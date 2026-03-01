@@ -97,6 +97,22 @@ export class GitService {
     }
   }
 
+  async setConfig(name: string, email: string): Promise<void> {
+    if (name) await this.git.addConfig('user.name', name);
+    if (email) await this.git.addConfig('user.email', email);
+  }
+
+  async getConfig(): Promise<{name: string, email: string}> {
+    const list = await this.git.listConfig();
+    // listConfig returns arrays of values for properties
+    const nameData = list.all['user.name'];
+    const emailData = list.all['user.email'];
+    return {
+      name: Array.isArray(nameData) ? nameData[0] : (typeof nameData === 'string' ? nameData : ''),
+      email: Array.isArray(emailData) ? emailData[0] : (typeof emailData === 'string' ? emailData : '')
+    };
+  }
+
   async push(remote = 'origin', branch?: string): Promise<void> {
     if (branch) {
       await this.git.push(remote, branch);

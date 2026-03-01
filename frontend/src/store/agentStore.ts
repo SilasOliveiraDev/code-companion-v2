@@ -70,8 +70,9 @@ interface AgentState {
   refreshFiles: () => Promise<void>;
   refreshGitStatus: () => Promise<void>;
   stageAll: () => Promise<void>;
-  commitChanges: (message: string) => Promise<void>;
-  setActivePanel: (panel: ActivePanel) => void;
+  commitChanges: (message: string) => Promise<void>;    pushChanges: () => Promise<void>;
+    getGitConfig: () => Promise<{name: string, email: string} | null>;
+    setGitConfig: (name: string, email: string) => Promise<void>;  setActivePanel: (panel: ActivePanel) => void;
   setBottomPanel: (panel: BottomPanel) => void;
   setPreviewUrl: (url: string | null) => void;
   loadRepositories: () => Promise<void>;
@@ -365,6 +366,32 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     const { rootPath } = get();
     await api.gitCommit(rootPath, message);
     await get().refreshGitStatus();
+  },
+
+  pushChanges: async () => {
+    const { rootPath } = get();
+    await api.gitPush(rootPath);
+    await get().refreshGitStatus();
+  },
+
+  getGitConfig: async () => {
+    try {
+      const { rootPath } = get();
+      const config = await api.gitGetConfig(rootPath);
+      return config;
+    } catch (error) {
+      console.error('Failed to get git config:', error);
+      return null;
+    }
+  },
+
+  setGitConfig: async (name: string, email: string) => {
+    try {
+      const { rootPath } = get();
+      await api.gitSetConfig(rootPath, name, email);
+    } catch (error) {
+      console.error('Failed to set git config:', error);
+    }
   },
 
   setActivePanel: (panel: ActivePanel) => set({ activePanel: panel }),

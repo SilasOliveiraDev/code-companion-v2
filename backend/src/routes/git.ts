@@ -154,4 +154,53 @@ router.get('/diff', async (req: Request, res: Response) => {
   }
 });
 
+// POST /api/git/push - Push commits
+router.post('/push', async (req: Request, res: Response) => {
+  const { remote, branch, repo } = req.body as {
+    remote?: string;
+    branch?: string;
+    repo?: string;
+  };
+
+  const git = getGit(repo || '');
+
+  try {
+    await git.push(remote, branch);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : 'Push failed' });
+  }
+});
+
+// GET /api/git/config - Get git config
+router.get('/config', async (req: Request, res: Response) => {
+  const { repo } = req.query as { repo?: string };
+  const git = getGit(repo || '');
+
+  try {
+    const config = await git.getConfig();
+    res.json(config);
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : 'Config fetch failed' });
+  }
+});
+
+// POST /api/git/config - Set git config
+router.post('/config', async (req: Request, res: Response) => {
+  const { name, email, repo } = req.body as {
+    name: string;
+    email: string;
+    repo?: string;
+  };
+
+  const git = getGit(repo || '');
+
+  try {
+    await git.setConfig(name, email);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : 'Config set failed' });
+  }
+});
+
 export default router;

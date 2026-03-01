@@ -7,24 +7,74 @@ import {
   Circle,
   RefreshCw,
   Check,
+  Upload,
+  Settings,
 } from 'lucide-react';
 import { useAgentStore } from '../../store/agentStore';
 
 export function GitPanel() {
-  const { gitStatus, gitLog, gitBranches, refreshGitStatus, stageAll, commitChanges } =
-    useAgentStore();
+  const { 
+    gitStatus, 
+    gitLog, 
+    gitBranches, 
+    refreshGitStatus, 
+    stageAll, 
+    commitChanges,
+    pushChanges,
+    getGitConfig,
+    setGitConfig
+  } = useAgentStore();
+  
   const [commitMsg, setCommitMsg] = useState('');
   const [isCommitting, setIsCommitting] = useState(false);
+  const [isPushing, setIsPushing] = useState(false);
+  const [showConfig, setShowConfig] = useState(false);
+  
+  const [configName, setConfigName] = useState('');
+  const [configEmail, setConfigEmail] = useState('');
+  
+  React.useEffect(() => {
+    if (showConfig) {
+      getGitConfig().then(cfg => {
+        if (cfg) {
+          setConfigName(cfg.name || '');
+          setConfigEmail(cfg.email || '');
+        }
+      });
+    }
+  }, [showConfig, getGitConfig]);
 
   const handleCommit = async () => {
     if (!commitMsg.trim() || isCommitting) return;
     setIsCommitting(true);
     try {
+      // Auto-stage all if nothing is staged but there are changes
+      if (gitStatus && gitStatus.staged.length === 0 && (gitStatus.unstaged.length > 0 || gitStatus.untracked.length > 0)) {
+        await stageAll();
+      }
       await commitChanges(commitMsg.trim());
       setCommitMsg('');
+    } catch (error) {
+      console.error("Failed to commit:", error);
+      alert("Failed to commit: You might need to configure your Git User/Email first via the gear icon.");
     } finally {
       setIsCommitting(false);
     }
+  };
+
+  const handlePush = async () => {
+    if (isPushing) return;
+    setIsPushing(true);
+    try {
+      await pushChanges();
+    } finally {
+      setIsPushing(false);
+    }
+  };
+
+  const handleSaveConfig = async () => {
+    await setGitConfig(configName, configEmail);
+    setShowConfig(false);
   };
 
   const totalChanges =
@@ -42,12 +92,51 @@ export function GitPanel() {
             <span className="badge badge-purple">{totalChanges}</span>
           )}
         </div>
-        <button onClick={refreshGitStatus} className="btn-ghost p-0.5" title="Refresh">
-          <RefreshCw size={11} />
-        </button>
+        <div className="flex items-center gap-1">
+          <button onClick={() => setShowConfig(!showConfig)} className="btn-ghost p-0.5" title="Git Setup">
+            <Settings size={11} className={showConfig ? "text-accent-light" : ""} />
+          </button>
+          <button onClick={refreshGitStatus} className="btn-ghost p-0.5" title="Refresh">
+            <RefreshCw size={11} />
+          </button>
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto">
+        {showConfig && (
+          <div className="p-3 border-b border-border-subtle bg-surface-1">
+            <h3 className="text-xs font-medium text-white mb-2">Git Configuration</h3>
+            <div className="space-y-2">
+              <div>
+                <label className="text-[10px] text-zinc-500 mb-1 block">Name</label>
+                <input 
+                  type="text" 
+                  value={configName} 
+                  onChange={e => setConfigName(e.target.value)} 
+                  className="input text-xs w-full py-1 h-7" 
+                  placeholder="e.g. John Doe"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] text-zinc-500 mb-1 block">Email</label>
+                <input 
+                  type="email" 
+                  value={configEmail} 
+                  onChange={e => setConfigEmail(e.target.value)} 
+                  className="input text-xs w-full py-1 h-7"
+                  placeholder="e.g. john@example.com"
+                />
+              </div>
+              <button 
+                onClick={handleSaveConfig}
+                className="btn-primary w-full text-xs justify-center mt-2 h-7"
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Branch info */}
         {gitBranches && (
           <div className="px-3 py-2 border-b border-border-subtle">
@@ -91,6 +180,20 @@ export function GitPanel() {
                 Commit
               </button>
             </div>
+          </div>
+        )}
+        
+        {/* Push action */}
+        {gitStatus && gitStatus.ahead > 0 && (
+          <div className="p-3 border-b border-border-subtle">
+            <button
+              onClick={handlePush}
+              disabled={isCommitting}
+              className="btn-primary w-full text-xs justify-center"
+            >
+              <Upload size={11} className="mr-1" />
+              Push {gitStatus.ahead} commit{gitStatus.ahead > 1 ? 's' : ''}
+            </button>
           </div>
         )}
 

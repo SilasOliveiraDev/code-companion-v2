@@ -162,6 +162,21 @@ export const api = {
       body: JSON.stringify({ repo, message }),
     }),
 
+  gitPush: (repo: string, remote?: string, branch?: string) =>
+    request<{ success: boolean }>('/git/push', {
+      method: 'POST',
+      body: JSON.stringify({ repo, remote, branch }),
+    }),
+
+  gitGetConfig: (repo: string) =>
+    request<{ name: string; email: string }>(`/git/config?repo=${encodeURIComponent(repo)}`),
+
+  gitSetConfig: (repo: string, name: string, email: string) =>
+    request<{ success: boolean }>('/git/config', {
+      method: 'POST',
+      body: JSON.stringify({ repo, name, email }),
+    }),
+
   gitDiff: (repo: string, file?: string, staged?: boolean) =>
     request<{ diff: string }>(
       `/git/diff?repo=${encodeURIComponent(repo)}${file ? `&file=${encodeURIComponent(file)}` : ''}${staged ? '&staged=true' : ''}`
