@@ -59,6 +59,15 @@ export function ToolExecutionCard({
     return name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
   };
 
+  const rawBasePath = args && typeof (args as any).basePath === 'string' ? String((args as any).basePath) : '';
+  const basePath = rawBasePath.trim() ? rawBasePath : undefined;
+  const normalizeSlashes = (p: string) => p.replace(/\\/g, '/');
+  const shortPath = (p: string, maxLen = 56) => {
+    const normalized = normalizeSlashes(p);
+    if (normalized.length <= maxLen) return normalized;
+    return `…${normalized.slice(-(maxLen - 1))}`;
+  };
+
   const hasChanges = changes && changes.length > 0;
   
   // Calculate total stats
@@ -104,6 +113,13 @@ export function ToolExecutionCard({
                 </div>
               )}
             </span>
+
+            {basePath && (
+              <span className="text-[10px] text-zinc-500 font-mono truncate">
+                basePath: {shortPath(basePath)}
+              </span>
+            )}
+
             <span className={cn(
               "text-xs truncate",
               isFailed ? "text-red-400" : "text-zinc-400"

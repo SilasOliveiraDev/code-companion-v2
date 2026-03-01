@@ -13,6 +13,7 @@ import { ToolRouter } from '../mcp/toolRouter';
 import { getOpenRouterClient, OpenRouterClient, OpenRouterMessage } from '../integrations/openrouter';
 import { getMemoryService, MemoryService } from '../services/memoryService';
 import { FileSystemService } from '../workspace/fileSystem';
+import { applyWorkspaceBasePath } from './toolArgs';
 
 const ASK_SYSTEM_PROMPT = `You are a senior full-stack software engineer assistant.
 Answer questions about software development, architecture, code, and best practices.
@@ -48,6 +49,9 @@ When given a task:
 2. Plan your changes
 3. Execute changes using appropriate tools (write_files, etc.)
 4. Verify results if needed
+
+IMPORTANT RELIABILITY RULE:
+- Never assume file paths exist. If you need a file, first use list_directory or search_files to confirm the actual structure.
 
 Always use the tools - do NOT just describe what you would do. Actually DO it using the available tools.
 Be proactive and complete tasks autonomously.`;
@@ -127,13 +131,18 @@ export class AIEngineerAgent {
       const messages = await this.memory.getMessages(sessionId);
       const activePlan = await this.memory.getActivePlan(sessionId);
 
+      const effectiveWorkspace: WorkspaceState = {
+        ...workspaceState,
+        rootPath: dbSession.workspace_path || workspaceState.rootPath,
+      };
+
       const session: AgentSession = {
         id: dbSession.id,
         mode: dbSession.mode as AgentMode,
         selectedModel: dbSession.selected_model,
         messages,
         currentPlan: activePlan || undefined,
-        workspace: workspaceState,
+        workspace: effectiveWorkspace,
         createdAt: new Date(dbSession.created_at),
         updatedAt: new Date(dbSession.updated_at),
       };
@@ -322,22 +331,24 @@ export class AIEngineerAgent {
         for (const toolCall of toolCalls) {
           const toolName = toolCall.function.name;
           console.log(`[Agent ASK] Executing tool: ${toolName}`);
-          
-          if (onStream) {
-              onStream({
-                type: 'tool',
-                toolName,
-                state: 'start',
-                args: {},
-                toolCallId: toolCall.id
-              });
-          }
 
           let toolArgs: Record<string, unknown> = {};
           try {
             toolArgs = JSON.parse(toolCall.function.arguments || '{}');
           } catch (e) {
             console.error('Failed to parse tool args:', e);
+          }
+
+          toolArgs = applyWorkspaceBasePath(toolName, toolArgs, session.workspace.rootPath);
+
+          if (onStream) {
+            onStream({
+              type: 'tool',
+              toolName,
+              state: 'start',
+              args: toolArgs,
+              toolCallId: toolCall.id,
+            });
           }
 
           const result = await this.toolRouter.execute({
@@ -567,6 +578,8 @@ Be helpful, concise, and match the user's language (if they speak Portuguese, re
               console.warn(`[Agent] Failed to parse tool arguments`);
             }
 
+            args = applyWorkspaceBasePath(toolCall.function.name, args, session.workspace.rootPath);
+
             onStream?.({
               type: 'tool',
               toolName: toolCall.function.name,
@@ -627,6 +640,8 @@ Be helpful, concise, and match the user's language (if they speak Portuguese, re
     const result = await this.executor.executePlan(
       session.currentPlan,
       workspaceContext,
+      session.id,
+      session.workspace.rootPath,
       (step, message) => {
         const progressMsg: ChatMessage = {
           id: uuidv4(),

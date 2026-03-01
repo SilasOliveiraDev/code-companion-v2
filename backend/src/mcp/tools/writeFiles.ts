@@ -2,6 +2,24 @@ import { MCPToolResult } from '../../types';
 import * as fs from 'fs';
 import * as path from 'path';
 
+function resolvePathWithinBase(inputPath: string, basePath: string): { ok: true; absolutePath: string } | { ok: false; error: string } {
+  const base = path.resolve(basePath);
+  const candidate = path.isAbsolute(inputPath)
+    ? path.resolve(inputPath)
+    : path.resolve(base, inputPath);
+  const relative = path.relative(base, candidate);
+
+  const isInside = relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+  if (!isInside) {
+    return {
+      ok: false,
+      error: `Path escapes basePath: ${inputPath}`,
+    };
+  }
+
+  return { ok: true, absolutePath: candidate };
+}
+
 export interface FileWrite {
   path: string;
   content: string;
@@ -20,9 +38,12 @@ export async function writeFiles(params: WriteFilesParams): Promise<MCPToolResul
 
   for (const file of files) {
     try {
-      const absolutePath = path.isAbsolute(file.path)
-        ? file.path
-        : path.join(basePath, file.path);
+      const resolved = resolvePathWithinBase(file.path, basePath);
+      if (!resolved.ok) {
+        errors.push(`${file.path}: ${resolved.error}`);
+        continue;
+      }
+      const absolutePath = resolved.absolutePath;
 
       const dir = path.dirname(absolutePath);
       if (!fs.existsSync(dir)) {

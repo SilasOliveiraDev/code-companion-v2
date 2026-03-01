@@ -2,6 +2,28 @@ import { MCPToolResult } from '../../types';
 import * as fs from 'fs';
 import * as path from 'path';
 
+function resolvePathWithinBase(inputPath: string, basePath?: string): { ok: true; absolutePath: string } | { ok: false; error: string } {
+  if (!basePath) {
+    return { ok: true, absolutePath: inputPath };
+  }
+
+  const base = path.resolve(basePath);
+  const candidate = path.isAbsolute(inputPath)
+    ? path.resolve(inputPath)
+    : path.resolve(base, inputPath);
+  const relative = path.relative(base, candidate);
+
+  const isInside = relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+  if (!isInside) {
+    return {
+      ok: false,
+      error: `Path escapes basePath: ${inputPath}`,
+    };
+  }
+
+  return { ok: true, absolutePath: candidate };
+}
+
 // ============================================
 // Read File Tool
 // ============================================
@@ -18,9 +40,11 @@ export async function readFile(params: ReadFileParams): Promise<MCPToolResult> {
   const { filePath, basePath, encoding = 'utf8', startLine, endLine } = params;
 
   try {
-    const absolutePath = basePath && !path.isAbsolute(filePath)
-      ? path.join(basePath, filePath)
-      : filePath;
+    const resolved = resolvePathWithinBase(filePath, basePath);
+    if (!resolved.ok) {
+      return { success: false, error: resolved.error };
+    }
+    const absolutePath = resolved.absolutePath;
 
     if (!fs.existsSync(absolutePath)) {
       return {
@@ -102,9 +126,11 @@ export async function listDirectory(params: ListDirectoryParams): Promise<MCPToo
   } = params;
 
   try {
-    const absolutePath = basePath && !path.isAbsolute(dirPath)
-      ? path.join(basePath, dirPath)
-      : dirPath;
+    const resolved = resolvePathWithinBase(dirPath, basePath);
+    if (!resolved.ok) {
+      return { success: false, error: resolved.error };
+    }
+    const absolutePath = resolved.absolutePath;
 
     if (!fs.existsSync(absolutePath)) {
       return {
@@ -209,9 +235,11 @@ export async function deleteFileOrDir(params: DeleteParams): Promise<MCPToolResu
   const { targetPath, basePath, recursive = false } = params;
 
   try {
-    const absolutePath = basePath && !path.isAbsolute(targetPath)
-      ? path.join(basePath, targetPath)
-      : targetPath;
+    const resolved = resolvePathWithinBase(targetPath, basePath);
+    if (!resolved.ok) {
+      return { success: false, error: resolved.error };
+    }
+    const absolutePath = resolved.absolutePath;
 
     if (!fs.existsSync(absolutePath)) {
       return {
@@ -262,13 +290,17 @@ export async function moveFile(params: MoveParams): Promise<MCPToolResult> {
   const { sourcePath, destPath, basePath, overwrite = false } = params;
 
   try {
-    const absoluteSource = basePath && !path.isAbsolute(sourcePath)
-      ? path.join(basePath, sourcePath)
-      : sourcePath;
+    const resolvedSource = resolvePathWithinBase(sourcePath, basePath);
+    if (!resolvedSource.ok) {
+      return { success: false, error: resolvedSource.error };
+    }
+    const resolvedDest = resolvePathWithinBase(destPath, basePath);
+    if (!resolvedDest.ok) {
+      return { success: false, error: resolvedDest.error };
+    }
 
-    const absoluteDest = basePath && !path.isAbsolute(destPath)
-      ? path.join(basePath, destPath)
-      : destPath;
+    const absoluteSource = resolvedSource.absolutePath;
+    const absoluteDest = resolvedDest.absolutePath;
 
     if (!fs.existsSync(absoluteSource)) {
       return {
@@ -323,13 +355,17 @@ export async function copyFile(params: CopyParams): Promise<MCPToolResult> {
   const { sourcePath, destPath, basePath, recursive = true, overwrite = false } = params;
 
   try {
-    const absoluteSource = basePath && !path.isAbsolute(sourcePath)
-      ? path.join(basePath, sourcePath)
-      : sourcePath;
+    const resolvedSource = resolvePathWithinBase(sourcePath, basePath);
+    if (!resolvedSource.ok) {
+      return { success: false, error: resolvedSource.error };
+    }
+    const resolvedDest = resolvePathWithinBase(destPath, basePath);
+    if (!resolvedDest.ok) {
+      return { success: false, error: resolvedDest.error };
+    }
 
-    const absoluteDest = basePath && !path.isAbsolute(destPath)
-      ? path.join(basePath, destPath)
-      : destPath;
+    const absoluteSource = resolvedSource.absolutePath;
+    const absoluteDest = resolvedDest.absolutePath;
 
     if (!fs.existsSync(absoluteSource)) {
       return {
@@ -505,9 +541,11 @@ export async function createDirectory(params: CreateDirectoryParams): Promise<MC
   const { dirPath, basePath } = params;
 
   try {
-    const absolutePath = basePath && !path.isAbsolute(dirPath)
-      ? path.join(basePath, dirPath)
-      : dirPath;
+    const resolved = resolvePathWithinBase(dirPath, basePath);
+    if (!resolved.ok) {
+      return { success: false, error: resolved.error };
+    }
+    const absolutePath = resolved.absolutePath;
 
     if (fs.existsSync(absolutePath)) {
       const stat = fs.statSync(absolutePath);
@@ -557,9 +595,11 @@ export async function getFileInfo(params: FileInfoParams): Promise<MCPToolResult
   const { filePath, basePath } = params;
 
   try {
-    const absolutePath = basePath && !path.isAbsolute(filePath)
-      ? path.join(basePath, filePath)
-      : filePath;
+    const resolved = resolvePathWithinBase(filePath, basePath);
+    if (!resolved.ok) {
+      return { success: false, error: resolved.error };
+    }
+    const absolutePath = resolved.absolutePath;
 
     if (!fs.existsSync(absolutePath)) {
       return {

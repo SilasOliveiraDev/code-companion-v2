@@ -1,7 +1,7 @@
-import { v4 as uuidv4 } from 'uuid';
-import { ExecutionPlan, PlanStep, ChatMessage, MCPToolCall } from '../types';
+import { ExecutionPlan, PlanStep, MCPToolCall } from '../types';
 import { ToolRouter } from '../mcp/toolRouter';
-import { getOpenRouterClient, OpenRouterClient, OpenRouterMessage, OpenRouterTool } from '../integrations/openrouter';
+import { getOpenRouterClient, OpenRouterClient, OpenRouterMessage } from '../integrations/openrouter';
+import { applyWorkspaceBasePath } from './toolArgs';
 
 const EXECUTOR_SYSTEM_PROMPT = `You are a senior full-stack software engineer executing an approved development plan.
 
@@ -15,6 +15,9 @@ Guidelines:
 - Prioritize security: never expose secrets, validate inputs, use environment variables
 - After each major step, confirm what was done
 - If a step fails, report the error clearly and suggest remediation
+
+IMPORTANT RELIABILITY RULE:
+- Never assume file paths exist. If you need a file, first use list_directory or search_files to confirm the actual structure.
 
 When writing code:
 - Use TypeScript where possible
@@ -36,6 +39,8 @@ export class PlanExecutor {
     step: PlanStep,
     plan: ExecutionPlan,
     workspaceContext: string,
+    sessionId: string,
+    workspaceRootPath: string,
     onProgress?: (message: string) => void,
     model?: string
   ): Promise<{ success: boolean; message: string; toolCalls: MCPToolCall[] }> {
@@ -97,10 +102,12 @@ Execute this step now using the available tools.`;
             args = {};
           }
 
+          args = applyWorkspaceBasePath(toolCall.function.name, args, workspaceRootPath);
+
           const mcpToolCall: MCPToolCall = {
             toolName: toolCall.function.name,
             parameters: args,
-            sessionId: uuidv4(),
+            sessionId,
           };
 
           toolCalls.push(mcpToolCall);
@@ -131,6 +138,8 @@ Execute this step now using the available tools.`;
   async executePlan(
     plan: ExecutionPlan,
     workspaceContext: string,
+    sessionId: string,
+    workspaceRootPath: string,
     onStepProgress?: (step: PlanStep, message: string) => void,
     model?: string
   ): Promise<{ success: boolean; completedSteps: string[]; errors: string[] }> {
@@ -145,6 +154,8 @@ Execute this step now using the available tools.`;
           step,
           plan,
           workspaceContext,
+          sessionId,
+          workspaceRootPath,
           (message) => onStepProgress?.(step, message),
           model
         );
