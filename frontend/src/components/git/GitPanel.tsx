@@ -22,7 +22,9 @@ export function GitPanel() {
     commitChanges,
     pushChanges,
     getGitConfig,
-    setGitConfig
+    setGitConfig,
+    rootPath,
+    currentRepoName
   } = useAgentStore();
   
   const [commitMsg, setCommitMsg] = useState('');
@@ -34,7 +36,7 @@ export function GitPanel() {
   const [configEmail, setConfigEmail] = useState('');
   
   React.useEffect(() => {
-    if (showConfig) {
+    if (showConfig && rootPath) {
       getGitConfig().then(cfg => {
         if (cfg) {
           setConfigName(cfg.name || '');
@@ -42,7 +44,7 @@ export function GitPanel() {
         }
       });
     }
-  }, [showConfig, getGitConfig]);
+  }, [showConfig, getGitConfig, rootPath]);
 
   const handleCommit = async () => {
     if (!commitMsg.trim() || isCommitting) return;
@@ -81,6 +83,29 @@ export function GitPanel() {
     (gitStatus?.staged.length || 0) +
     (gitStatus?.unstaged.length || 0) +
     (gitStatus?.untracked.length || 0);
+
+  if (!rootPath) {
+    return (
+      <div className="flex flex-col h-full overflow-hidden">
+        <div className="panel-header justify-between flex-shrink-0">
+          <div className="flex items-center gap-1.5">
+            <span>Source Control</span>
+          </div>
+          <button onClick={refreshGitStatus} className="btn-ghost p-0.5" title="Refresh">
+            <RefreshCw size={11} />
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-4">
+          <div className="text-xs text-zinc-500">
+            Select a repository in the Explorer before committing.
+          </div>
+          {currentRepoName && (
+            <div className="text-[10px] text-zinc-600 mt-1">{currentRepoName}</div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-full overflow-hidden">

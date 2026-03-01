@@ -411,6 +411,12 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     const { repositories } = get();
     const repo = repositories.find(r => r.id === repoId);
 
+    try {
+      localStorage.setItem('ccv2.selectedRepoId', repoId);
+    } catch {
+      // ignore (e.g. privacy mode)
+    }
+
     set({
       currentRepoId: repoId,
       currentRepoName: repo?.name || repoPath.split(/[\\/]/).pop() || '',

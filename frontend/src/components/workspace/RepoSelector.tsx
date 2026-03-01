@@ -35,20 +35,30 @@ export function RepoSelector({ onRepoSelect, currentRepoId }: RepoSelectorProps)
     loadRepos();
   }, []);
 
+  useEffect(() => {
+    if (!currentRepoId) return;
+    setSelectedRepoId(currentRepoId);
+  }, [currentRepoId]);
+
   const loadRepos = async () => {
     try {
       setIsLoading(true);
       setError(null);
       const response = await api.getRepos();
       setRepos(response.repos);
-      
-      // Auto-select current project if not set
+
+      // Safe auto-select: restore last selection, or auto-select only if there's exactly 1 repo.
       if (!selectedRepoId && response.repos.length > 0) {
-        const currentProject = response.repos.find(
-          (r: Repository) => r.name === 'code-companion-v2'
-        ) || response.repos[0];
-        setSelectedRepoId(currentProject.id);
-        onRepoSelect?.(currentProject.id, currentProject.path);
+        const storedRepoId = localStorage.getItem('ccv2.selectedRepoId');
+        const stored = storedRepoId ? response.repos.find((r: Repository) => r.id === storedRepoId) : null;
+
+        if (stored) {
+          setSelectedRepoId(stored.id);
+          onRepoSelect?.(stored.id, stored.path);
+        } else if (response.repos.length === 1) {
+          setSelectedRepoId(response.repos[0].id);
+          onRepoSelect?.(response.repos[0].id, response.repos[0].path);
+        }
       }
     } catch (err) {
       console.error('Error loading repos:', err);
@@ -61,6 +71,11 @@ export function RepoSelector({ onRepoSelect, currentRepoId }: RepoSelectorProps)
   const handleRepoSelect = (repo: Repository) => {
     setSelectedRepoId(repo.id);
     setIsExpanded(false);
+    try {
+      localStorage.setItem('ccv2.selectedRepoId', repo.id);
+    } catch {
+      // ignore
+    }
     onRepoSelect?.(repo.id, repo.path);
   };
 

@@ -121,6 +121,11 @@ export class GitService {
     }
   }
 
+  async getRemotes(): Promise<string[]> {
+    const remotes = await this.git.getRemotes(true);
+    return remotes.map((r) => r.name);
+  }
+
   async init(): Promise<void> {
     await this.git.init();
   }

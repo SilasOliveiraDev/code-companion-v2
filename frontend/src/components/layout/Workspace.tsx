@@ -26,11 +26,46 @@ function ResizeHandle({ direction = 'horizontal' }: { direction?: 'horizontal' |
 }
 
 export function Workspace() {
-  const { initSession, bottomPanel, setBottomPanel, showPreview } = useAgentStore();
+  const {
+    initSession,
+    sessionId,
+    bottomPanel,
+    setBottomPanel,
+    showPreview,
+    repositories,
+    currentRepoId,
+    loadRepositories,
+    selectRepository,
+  } = useAgentStore();
 
   useEffect(() => {
-    initSession((import.meta as any).env.VITE_WORKSPACE_ROOT || '/tmp/workspace');
-  }, [initSession]);
+    loadRepositories();
+  }, [loadRepositories]);
+
+  useEffect(() => {
+    if (currentRepoId) return;
+    if (!repositories || repositories.length === 0) return;
+
+    const storedRepoId = localStorage.getItem('ccv2.selectedRepoId');
+    const stored = storedRepoId ? repositories.find((r) => r.id === storedRepoId) : null;
+    if (stored) {
+      selectRepository(stored.id, stored.path);
+      return;
+    }
+
+    if (repositories.length === 1) {
+      selectRepository(repositories[0].id, repositories[0].path);
+    }
+  }, [repositories, currentRepoId, selectRepository]);
+
+  // Fallback: if no repos are found, keep old behavior using env/workspace root.
+  useEffect(() => {
+    if (sessionId) return;
+    if (currentRepoId) return;
+    if (repositories.length > 0) return;
+    const fallbackRoot = (import.meta as any).env.VITE_WORKSPACE_ROOT as string | undefined;
+    if (fallbackRoot) initSession(fallbackRoot);
+  }, [sessionId, currentRepoId, repositories.length, initSession]);
 
   const toggleBottomPanel = (panel: BottomPanel) => {
     setBottomPanel(bottomPanel === panel ? 'none' : panel);
