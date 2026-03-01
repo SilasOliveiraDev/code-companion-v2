@@ -1,6 +1,6 @@
-import Anthropic from '@anthropic-ai/sdk';
 import { v4 as uuidv4 } from 'uuid';
 import { ExecutionPlan, PlanStep, ChatMessage } from '../types';
+import { getOpenRouterClient, OpenRouterClient, OpenRouterMessage } from '../integrations/openrouter';
 
 const PLANNER_SYSTEM_PROMPT = `You are a senior full-stack software engineer acting as an AI planning agent.
 
@@ -31,24 +31,24 @@ Rules:
 - Respond ONLY with valid JSON, no markdown fences`;
 
 export class ExecutionPlanner {
-  private client: Anthropic;
+  private client: OpenRouterClient;
 
   constructor() {
-    this.client = new Anthropic({
-      apiKey: process.env.ANTHROPIC_API_KEY,
-    });
+    this.client = getOpenRouterClient();
   }
 
   async generatePlan(
     userRequest: string,
     conversationHistory: ChatMessage[],
-    workspaceContext?: string
+    workspaceContext?: string,
+    model?: string
   ): Promise<ExecutionPlan> {
     const systemContext = workspaceContext
       ? `${PLANNER_SYSTEM_PROMPT}\n\nWorkspace context:\n${workspaceContext}`
       : PLANNER_SYSTEM_PROMPT;
 
-    const messages: Anthropic.Messages.MessageParam[] = [
+    const messages: OpenRouterMessage[] = [
+      { role: 'system', content: systemContext },
       ...conversationHistory
         .filter((m) => m.role === 'user' || m.role === 'assistant')
         .slice(-10)
@@ -62,16 +62,15 @@ export class ExecutionPlanner {
       },
     ];
 
-    const response = await this.client.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 4096,
-      system: systemContext,
+    const response = await this.client.chat({
+      model,
       messages,
+      max_tokens: 4096,
     });
 
-    const content = response.content[0];
-    if (content.type !== 'text') {
-      throw new Error('Unexpected response type from planner');
+    const content = response.choices[0]?.message?.content;
+    if (!content) {
+      throw new Error('No response from planner');
     }
 
     let rawPlan: {
@@ -88,10 +87,10 @@ export class ExecutionPlanner {
     };
 
     try {
-      const jsonText = content.text.replace(/```json\n?|\n?```/g, '').trim();
+      const jsonText = content.replace(/```json\n?|\n?```/g, '').trim();
       rawPlan = JSON.parse(jsonText);
     } catch {
-      throw new Error(`Failed to parse plan JSON: ${content.text}`);
+      throw new Error(`Failed to parse plan JSON: ${content}`);
     }
 
     const plan: ExecutionPlan = {

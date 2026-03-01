@@ -8,6 +8,7 @@ export interface ChatMessage {
   id: string;
   role: MessageRole;
   content: string;
+  images?: string[];
   timestamp: Date;
   metadata?: Record<string, unknown>;
 }
@@ -92,6 +93,7 @@ export interface MCPToolResult {
 export interface AgentSession {
   id: string;
   mode: AgentMode;
+  selectedModel: string;
   messages: ChatMessage[];
   currentPlan?: ExecutionPlan;
   workspace: WorkspaceState;
@@ -117,6 +119,20 @@ export interface DeploymentInfo {
   status: 'building' | 'ready' | 'error';
   updatedAt: Date;
 }
+
+export type StreamChunkToolState = 'start' | 'success' | 'failed';
+
+export interface StreamEventTool {
+  type: 'tool';
+  toolName: string;
+  state: StreamChunkToolState;
+  args?: Record<string, unknown>;
+  result?: any;
+  error?: string;
+  toolCallId?: string;
+}
+
+export type StreamEvent = string | StreamEventTool;
 
 export interface SupabaseConfig {
   projectUrl: string;

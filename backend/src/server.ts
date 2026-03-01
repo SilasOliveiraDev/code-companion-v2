@@ -1,16 +1,18 @@
+import dotenv from 'dotenv';
+dotenv.config();
+
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import { createServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
-import dotenv from 'dotenv';
 
 import agentRoutes from './routes/agent';
 import workspaceRoutes from './routes/workspace';
 import gitRoutes from './routes/git';
-
-dotenv.config();
+import openrouterRoutes from './routes/openrouter';
+import supabaseRoutes from './routes/supabase';
 
 const app = express();
 const httpServer = createServer(app);
@@ -37,6 +39,8 @@ app.use(express.urlencoded({ extended: true }));
 app.use('/api/agent', agentRoutes);
 app.use('/api/workspace', workspaceRoutes);
 app.use('/api/git', gitRoutes);
+app.use('/api/openrouter', openrouterRoutes);
+app.use('/api/supabase', supabaseRoutes);
 
 // Health check
 app.get('/api/health', (_req, res) => {

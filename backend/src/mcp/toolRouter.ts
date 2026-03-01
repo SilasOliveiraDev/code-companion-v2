@@ -4,8 +4,100 @@ import { writeFiles, WriteFilesParams } from './tools/writeFiles';
 import { deployPreview, DeployPreviewParams } from './tools/deployPreview';
 import { runMigrations, RunMigrationsParams } from './tools/runMigrations';
 import { connectSupabase, ConnectSupabaseParams } from './tools/connectSupabase';
+import {
+  readFile, ReadFileParams,
+  listDirectory, ListDirectoryParams,
+  deleteFileOrDir, DeleteParams,
+  moveFile, MoveParams,
+  copyFile, CopyParams,
+  searchFiles, SearchFilesParams,
+  createDirectory, CreateDirectoryParams,
+  getFileInfo, FileInfoParams,
+} from './tools/filesystem';
 
 export const MCP_TOOLS: MCPTool[] = [
+  // Filesystem Tools
+  {
+    name: 'read_file',
+    description: 'Read the contents of a file. Can read specific line ranges.',
+    parameters: {
+      filePath: { type: 'string', description: 'Path to the file to read', required: true },
+      basePath: { type: 'string', description: 'Base path for relative file paths' },
+      encoding: { type: 'string', description: 'File encoding (default: utf8)' },
+      startLine: { type: 'number', description: 'Start reading from this line (1-indexed)' },
+      endLine: { type: 'number', description: 'Stop reading at this line (inclusive)' },
+    },
+  },
+  {
+    name: 'list_directory',
+    description: 'List contents of a directory with optional filtering and recursion',
+    parameters: {
+      dirPath: { type: 'string', description: 'Path to the directory to list', required: true },
+      basePath: { type: 'string', description: 'Base path for relative paths' },
+      recursive: { type: 'boolean', description: 'Recursively list subdirectories' },
+      maxDepth: { type: 'number', description: 'Maximum depth for recursive listing (default: 3)' },
+      includeHidden: { type: 'boolean', description: 'Include hidden files (starting with .)' },
+      pattern: { type: 'string', description: 'Regex pattern to filter file names' },
+    },
+  },
+  {
+    name: 'delete_file',
+    description: 'Delete a file or directory',
+    parameters: {
+      targetPath: { type: 'string', description: 'Path to delete', required: true },
+      basePath: { type: 'string', description: 'Base path for relative paths' },
+      recursive: { type: 'boolean', description: 'Recursively delete directory contents' },
+    },
+  },
+  {
+    name: 'move_file',
+    description: 'Move or rename a file or directory',
+    parameters: {
+      sourcePath: { type: 'string', description: 'Source path', required: true },
+      destPath: { type: 'string', description: 'Destination path', required: true },
+      basePath: { type: 'string', description: 'Base path for relative paths' },
+      overwrite: { type: 'boolean', description: 'Overwrite destination if exists' },
+    },
+  },
+  {
+    name: 'copy_file',
+    description: 'Copy a file or directory',
+    parameters: {
+      sourcePath: { type: 'string', description: 'Source path', required: true },
+      destPath: { type: 'string', description: 'Destination path', required: true },
+      basePath: { type: 'string', description: 'Base path for relative paths' },
+      recursive: { type: 'boolean', description: 'Recursively copy directories' },
+      overwrite: { type: 'boolean', description: 'Overwrite destination if exists' },
+    },
+  },
+  {
+    name: 'search_files',
+    description: 'Search for text content in files within a directory',
+    parameters: {
+      query: { type: 'string', description: 'Text to search for', required: true },
+      basePath: { type: 'string', description: 'Directory to search in', required: true },
+      extensions: { type: 'array', description: 'File extensions to include (e.g., ["ts", "js"])' },
+      maxResults: { type: 'number', description: 'Maximum number of results (default: 50)' },
+      caseSensitive: { type: 'boolean', description: 'Case-sensitive search' },
+    },
+  },
+  {
+    name: 'create_directory',
+    description: 'Create a new directory (including parent directories if needed)',
+    parameters: {
+      dirPath: { type: 'string', description: 'Path of directory to create', required: true },
+      basePath: { type: 'string', description: 'Base path for relative paths' },
+    },
+  },
+  {
+    name: 'get_file_info',
+    description: 'Get detailed information about a file or directory',
+    parameters: {
+      filePath: { type: 'string', description: 'Path to the file or directory', required: true },
+      basePath: { type: 'string', description: 'Base path for relative paths' },
+    },
+  },
+  // Project Tools
   {
     name: 'create_repo',
     description: 'Create a new git repository with initial scaffold',
@@ -60,16 +152,34 @@ export const MCP_TOOLS: MCPTool[] = [
 export class ToolRouter {
   async execute(call: MCPToolCall): Promise<MCPToolResult> {
     switch (call.toolName) {
+      // Filesystem tools
+      case 'read_file':
+        return readFile(call.parameters as unknown as ReadFileParams);
+      case 'list_directory':
+        return listDirectory(call.parameters as unknown as ListDirectoryParams);
+      case 'delete_file':
+        return deleteFileOrDir(call.parameters as unknown as DeleteParams);
+      case 'move_file':
+        return moveFile(call.parameters as unknown as MoveParams);
+      case 'copy_file':
+        return copyFile(call.parameters as unknown as CopyParams);
+      case 'search_files':
+        return searchFiles(call.parameters as unknown as SearchFilesParams);
+      case 'create_directory':
+        return createDirectory(call.parameters as unknown as CreateDirectoryParams);
+      case 'get_file_info':
+        return getFileInfo(call.parameters as unknown as FileInfoParams);
+      // Project tools
       case 'create_repo':
-        return createRepo(call.parameters as CreateRepoParams);
+        return createRepo(call.parameters as unknown as CreateRepoParams);
       case 'write_files':
-        return writeFiles(call.parameters as WriteFilesParams);
+        return writeFiles(call.parameters as unknown as WriteFilesParams);
       case 'deploy_preview':
-        return deployPreview(call.parameters as DeployPreviewParams);
+        return deployPreview(call.parameters as unknown as DeployPreviewParams);
       case 'run_migrations':
-        return runMigrations(call.parameters as RunMigrationsParams);
+        return runMigrations(call.parameters as unknown as RunMigrationsParams);
       case 'connect_supabase':
-        return connectSupabase(call.parameters as ConnectSupabaseParams);
+        return connectSupabase(call.parameters as unknown as ConnectSupabaseParams);
       default:
         return {
           success: false,

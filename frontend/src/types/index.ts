@@ -8,8 +8,11 @@ export interface ChatMessage {
   id: string;
   role: MessageRole;
   content: string;
+  images?: string[]; // Array of base64 image strings
   timestamp: string;
-  metadata?: Record<string, unknown>;
+  metadata?: Record<string, unknown> & {
+     toolCalls?: StreamEventTool[];
+  };
 }
 
 export interface PlanStep {
@@ -69,4 +72,32 @@ export interface WorkspaceLayout {
   bottomPanel: BottomPanel;
   activePanel: ActivePanel;
   showPreview: boolean;
+}
+
+export interface LLMModel {
+  id: string;
+  name: string;
+  context_length?: number;
+  pricing?: {
+    prompt: number;
+    completion: number;
+  };
+}
+
+export interface OpenRouterStatus {
+  connected: boolean;
+  defaultModel?: string;
+  error?: string;
+}
+
+export type StreamChunkToolState = 'start' | 'success' | 'failed';
+
+export interface StreamEventTool {
+  type: 'tool';
+  toolName: string;
+  state: StreamChunkToolState;
+  args?: Record<string, unknown>;
+  result?: any;
+  error?: string;
+  toolCallId?: string;
 }

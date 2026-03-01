@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   ChevronRight,
   ChevronDown,
@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { FileNode } from '../../types';
 import { useAgentStore } from '../../store/agentStore';
+import { RepoSelector } from '../workspace/RepoSelector';
 
 const EXTENSION_COLORS: Record<string, string> = {
   ts: 'text-blue-400',
@@ -106,12 +107,32 @@ function FileNodeItem({ node, depth, onOpen, activeFile }: FileNodeProps) {
 }
 
 export function FileExplorer() {
-  const { files, activeFile, openFile, refreshFiles, rootPath } = useAgentStore();
+  const { 
+    files, 
+    activeFile, 
+    openFile, 
+    refreshFiles, 
+    rootPath, 
+    currentRepoId, 
+    currentRepoName,
+    loadRepositories,
+    selectRepository 
+  } = useAgentStore();
+
+  useEffect(() => {
+    loadRepositories();
+  }, [loadRepositories]);
 
   return (
     <div className="flex flex-col h-full">
+      {/* Repository Selector */}
+      <RepoSelector 
+        currentRepoId={currentRepoId || undefined}
+        onRepoSelect={selectRepository}
+      />
+
       <div className="panel-header justify-between">
-        <span>Explorer</span>
+        <span className="truncate">{currentRepoName || 'Explorer'}</span>
         <button
           onClick={refreshFiles}
           className="btn-ghost p-0.5"

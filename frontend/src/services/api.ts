@@ -1,4 +1,4 @@
-import { AgentMode, FileNode, GitStatus, GitCommit } from '../types';
+import { AgentMode, FileNode, GitStatus, GitCommit, LLMModel, OpenRouterStatus } from '../types';
 
 const BASE_URL = '/api';
 
@@ -16,7 +16,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
 interface StreamChunk {
   type: 'chunk' | 'done' | 'error';
-  content?: string;
+  content?: string | import('../types').StreamEventTool;
   message?: { id: string; role: string; content: string; timestamp: string };
   plan?: import('../types').ExecutionPlan;
   error?: string;
@@ -40,12 +40,13 @@ export const api = {
   streamMessage: async (
     sessionId: string,
     message: string,
+    images: string[] | undefined,
     onChunk: (chunk: StreamChunk) => void
   ): Promise<void> => {
     const res = await fetch(`${BASE_URL}/agent/sessions/${sessionId}/message`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message }),
+      body: JSON.stringify({ message, images }),
     });
 
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -165,4 +166,44 @@ export const api = {
     request<{ diff: string }>(
       `/git/diff?repo=${encodeURIComponent(repo)}${file ? `&file=${encodeURIComponent(file)}` : ''}${staged ? '&staged=true' : ''}`
     ),
+
+  // OpenRouter / LLM
+  getOpenRouterStatus: () =>
+    request<OpenRouterStatus>('/openrouter/status'),
+
+  getModels: () =>
+    request<{ models: LLMModel[]; total: number; defaultModel: string }>('/openrouter/models'),
+
+  setModel: (sessionId: string, model: string) =>
+    request<{ success: boolean; model: string }>(`/agent/sessions/${sessionId}/model`, {
+      method: 'PATCH',
+      body: JSON.stringify({ model }),
+    }),
+
+  // Generic methods
+  get: <T = unknown>(path: string) => request<T>(path),
+
+  // Workspace/Repos
+  getRepos: () =>
+    request<{ repos: { id: string; name: string; path: string; lastAccessedAt: string }[]; total: number }>('/workspace/repos'),
+
+  getRepoContext: (repoId: string) =>
+    request<{ context: string; workspaceId: string; workspacePath: string }>(`/workspace/repos/${repoId}/context`),
+
+  createRepo: (name: string, template?: 'empty' | 'react' | 'node' | 'nextjs', initGit = true) =>
+    request<{ success: boolean; repo: { id: string; name: string; path: string; template: string } }>('/workspace/repos', {
+      method: 'POST',
+      body: JSON.stringify({ name, template, initGit }),
+    }),
+
+  cloneRepo: (url: string, name?: string) =>
+    request<{ success: boolean; repo: { id: string; name: string; path: string; url: string } }>('/workspace/repos/clone', {
+      method: 'POST',
+      body: JSON.stringify({ url, name }),
+    }),
+
+  scanRepos: () =>
+    request<{ repos: { id: string; name: string; path: string; lastAccessedAt: string }[]; total: number }>('/workspace/repos/scan', {
+      method: 'POST',
+    }),
 };

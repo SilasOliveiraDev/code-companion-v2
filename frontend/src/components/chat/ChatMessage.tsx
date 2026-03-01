@@ -2,6 +2,7 @@ import React from 'react';
 import { Bot, User } from 'lucide-react';
 import { ChatMessage as ChatMessageType, ExecutionPlan } from '../../types';
 import { PlanCard } from './PlanCard';
+import { ToolExecutionCard, ToolExecuteStatus, FileChange } from './ToolExecutionCard';
 
 interface ChatMessageProps {
   message: ChatMessageType;
@@ -146,12 +147,52 @@ export function ChatMessageComponent({
       <div className={`flex-1 min-w-0 ${isUser ? 'items-end' : 'items-start'} flex flex-col`}>
         {isUser ? (
           <div className="bg-accent/20 border border-accent/30 rounded-xl rounded-tr-sm px-3 py-2 max-w-lg">
+            {message.images && message.images.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-2">
+                {message.images.map((img, i) => (
+                  <img key={i} src={img} alt="Pasted" className="max-w-[200px] max-h-[200px] rounded-md border border-border/50 object-contain bg-surface-2" />
+                ))}
+              </div>
+            )}
             <p className="text-sm text-white">{message.content}</p>
           </div>
         ) : (
           <div className="w-full space-y-3">
+            {message.metadata?.toolCalls && message.metadata.toolCalls.length > 0 && (
+              <div className="space-y-2 mb-3">
+                 {message.metadata.toolCalls.map((toolCall: any, idx: number) => {
+                    let changes: FileChange[] | undefined = undefined;
+
+                    if (toolCall.toolName === 'write_files' || toolCall.toolName === 'create_files' || toolCall.toolName === 'modify_files') {
+                       if (toolCall.args?.files) {
+                           changes = toolCall.args.files.map((file: any) => ({
+                              path: file.path,
+                              type: 'modify',
+                           }));
+                       }
+                    }
+
+                    return (
+                      <ToolExecutionCard
+                         key={idx}
+                         toolName={toolCall.toolName}
+                         args={toolCall.args}
+                         status={
+                             toolCall.state === 'start' ? 'executing' :
+                             toolCall.state === 'success' ? 'success' : 'failed'
+                         }
+                         result={toolCall.result}
+                         error={toolCall.error}
+                         changes={changes}
+                         className="max-w-xl"
+                      />
+                    );
+                 })}
+              </div>
+            )}
+
             {message.content && (
-              <div className="leading-relaxed">{formatContent(message.content)}</div>
+              <div className="leading-relaxed">{formatContent(message.content.replace(/\[(?:Executing|Reading):[^\]]+\]/g, '').replace(/\[[^\]]+: (?:Success|Failed - [^\]]+)\]/g, '').trim())}</div>
             )}
 
             {plan && plan.status !== 'rejected' && onApprovePlan && onRejectPlan && (

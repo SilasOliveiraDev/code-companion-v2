@@ -1,7 +1,7 @@
-import Anthropic from '@anthropic-ai/sdk';
 import { v4 as uuidv4 } from 'uuid';
 import { ExecutionPlan, PlanStep, ChatMessage, MCPToolCall } from '../types';
 import { ToolRouter } from '../mcp/toolRouter';
+import { getOpenRouterClient, OpenRouterClient, OpenRouterMessage, OpenRouterTool } from '../integrations/openrouter';
 
 const EXECUTOR_SYSTEM_PROMPT = `You are a senior full-stack software engineer executing an approved development plan.
 
@@ -24,13 +24,11 @@ When writing code:
 - Keep UI consistent and professional`;
 
 export class PlanExecutor {
-  private client: Anthropic;
+  private client: OpenRouterClient;
   private toolRouter: ToolRouter;
 
   constructor(toolRouter: ToolRouter) {
-    this.client = new Anthropic({
-      apiKey: process.env.ANTHROPIC_API_KEY,
-    });
+    this.client = getOpenRouterClient();
     this.toolRouter = toolRouter;
   }
 
@@ -38,7 +36,8 @@ export class PlanExecutor {
     step: PlanStep,
     plan: ExecutionPlan,
     workspaceContext: string,
-    onProgress?: (message: string) => void
+    onProgress?: (message: string) => void,
+    model?: string
   ): Promise<{ success: boolean; message: string; toolCalls: MCPToolCall[] }> {
     const toolCalls: MCPToolCall[] = [];
 
@@ -56,9 +55,10 @@ ${workspaceContext}
 
 Execute this step now using the available tools.`;
 
-    const tools = this.toolRouter.getToolDefinitionsForClaude();
+    const tools = OpenRouterClient.convertAnthropicTools(this.toolRouter.getToolDefinitionsForClaude());
 
-    const messages: Anthropic.Messages.MessageParam[] = [
+    const messages: OpenRouterMessage[] = [
+      { role: 'system', content: EXECUTOR_SYSTEM_PROMPT },
       { role: 'user', content: prompt },
     ];
 
@@ -66,57 +66,59 @@ Execute this step now using the available tools.`;
     let finalMessage = '';
 
     while (continueLoop) {
-      const response = await this.client.messages.create({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 8192,
-        system: EXECUTOR_SYSTEM_PROMPT,
-        tools,
+      const response = await this.client.chat({
+        model,
         messages,
+        tools,
+        tool_choice: 'auto',
+        max_tokens: 8192,
       });
 
-      const assistantContent: Anthropic.Messages.ContentBlock[] = [];
+      const choice = response.choices[0];
+      const assistantMessage = choice.message;
 
-      for (const block of response.content) {
-        assistantContent.push(block);
+      if (assistantMessage.content) {
+        finalMessage = assistantMessage.content;
+        onProgress?.(assistantMessage.content);
+      }
 
-        if (block.type === 'text') {
-          finalMessage = block.text;
-          onProgress?.(block.text);
-        } else if (block.type === 'tool_use') {
-          const toolCall: MCPToolCall = {
-            toolName: block.name,
-            parameters: block.input as Record<string, unknown>,
+      if (assistantMessage.tool_calls && assistantMessage.tool_calls.length > 0) {
+        messages.push({
+          role: 'assistant',
+          content: assistantMessage.content || '',
+          tool_calls: assistantMessage.tool_calls,
+        });
+
+        for (const toolCall of assistantMessage.tool_calls) {
+          let args: Record<string, unknown>;
+          try {
+            args = JSON.parse(toolCall.function.arguments);
+          } catch {
+            args = {};
+          }
+
+          const mcpToolCall: MCPToolCall = {
+            toolName: toolCall.function.name,
+            parameters: args,
             sessionId: uuidv4(),
           };
 
-          toolCalls.push(toolCall);
-          onProgress?.(`Executing tool: ${block.name}`);
+          toolCalls.push(mcpToolCall);
+          onProgress?.(`Executing tool: ${toolCall.function.name}`);
 
-          const result = await this.toolRouter.execute(toolCall);
+          const result = await this.toolRouter.execute(mcpToolCall);
 
-          messages.push(
-            { role: 'assistant', content: assistantContent },
-            {
-              role: 'user',
-              content: [
-                {
-                  type: 'tool_result',
-                  tool_use_id: block.id,
-                  content: JSON.stringify(result),
-                },
-              ],
-            }
-          );
-
-          assistantContent.length = 0;
+          messages.push({
+            role: 'tool',
+            content: JSON.stringify(result),
+            tool_call_id: toolCall.id,
+          });
         }
-      }
 
-      if (assistantContent.length > 0 && !messages.some((m) => m.role === 'assistant' && m.content === assistantContent)) {
-        messages.push({ role: 'assistant', content: assistantContent });
+        continueLoop = true;
+      } else {
+        continueLoop = false;
       }
-
-      continueLoop = response.stop_reason === 'tool_use';
     }
 
     return {
@@ -129,7 +131,8 @@ Execute this step now using the available tools.`;
   async executePlan(
     plan: ExecutionPlan,
     workspaceContext: string,
-    onStepProgress?: (step: PlanStep, message: string) => void
+    onStepProgress?: (step: PlanStep, message: string) => void,
+    model?: string
   ): Promise<{ success: boolean; completedSteps: string[]; errors: string[] }> {
     const completedSteps: string[] = [];
     const errors: string[] = [];
@@ -142,7 +145,8 @@ Execute this step now using the available tools.`;
           step,
           plan,
           workspaceContext,
-          (message) => onStepProgress?.(step, message)
+          (message) => onStepProgress?.(step, message),
+          model
         );
 
         if (result.success) {

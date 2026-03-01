@@ -1,8 +1,9 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { Send, Square, RotateCcw, ChevronDown } from 'lucide-react';
+import { Send, Square, RotateCcw, ChevronDown, Image as ImageIcon, X } from 'lucide-react';
 import { useAgentStore } from '../../store/agentStore';
 import { ChatMessageComponent } from './ChatMessage';
 import { ModeSelector } from './ModeSelector';
+import { ModelSelector } from './ModelSelector';
 
 export function ChatPanel() {
   const {
@@ -17,6 +18,7 @@ export function ChatPanel() {
   } = useAgentStore();
 
   const [input, setInput] = useState('');
+  const [images, setImages] = useState<string[]>([]);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -39,12 +41,46 @@ export function ChatPanel() {
     setShowScrollButton(!atBottom);
   };
 
+  const toBase64 = (file: File) => new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = error => reject(error);
+  });
+
+  const handlePaste = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = e.clipboardData?.items;
+    
+    if (items) {
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.indexOf('image') !== -1) {
+          e.preventDefault();
+          const file = items[i].getAsFile();
+          if (file) {
+            try {
+              const base64 = await toBase64(file);
+              setImages(prev => [...prev, base64]);
+            } catch (error) {
+              console.error('Failed to parse image', error);
+            }
+          }
+        }
+      }
+    }
+  };
+
+  const handleRemoveImage = (index: number) => {
+    setImages(prev => prev.filter((_, i) => i !== index));
+  };
+
   const handleSend = async () => {
     const trimmed = input.trim();
-    if (!trimmed || isStreaming) return;
+    if ((!trimmed && images.length === 0) || isStreaming) return;
     setInput('');
+    const currentImages = [...images];
+    setImages([]);
     inputRef.current?.focus();
-    await sendMessage(trimmed);
+    await sendMessage(trimmed, currentImages.length > 0 ? currentImages : undefined);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -85,6 +121,7 @@ export function ChatPanel() {
           )}
         </div>
         <div className="flex items-center gap-2">
+          <ModelSelector />
           <ModeSelector mode={mode} onChange={setMode} disabled={isStreaming} />
         </div>
       </div>
@@ -181,12 +218,28 @@ export function ChatPanel() {
 
       {/* Input area */}
       <div className="flex-shrink-0 border-t border-border-subtle p-3">
+        {images.length > 0 && (
+          <div className="flex gap-2 flex-wrap mb-2">
+            {images.map((img, i) => (
+              <div key={i} className="relative group">
+                <img src={img} alt="Pasted" className="h-16 w-auto rounded-md border border-border object-contain bg-surface-2" />
+                <button
+                  onClick={() => handleRemoveImage(i)}
+                  className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-surface-3 border border-border rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-surface-4"
+                >
+                  <X size={10} className="text-zinc-300" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
         <div className="flex gap-2 items-end bg-surface-2 rounded-xl border border-border focus-within:border-accent/50 transition-colors p-2">
           <textarea
             ref={inputRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
             placeholder={
               mode === 'ASK'
                 ? 'Ask a question about your codebase...'
@@ -205,7 +258,7 @@ export function ChatPanel() {
             ) : (
               <button
                 onClick={handleSend}
-                disabled={!input.trim()}
+                disabled={!input.trim() && images.length === 0}
                 className="btn-primary py-1.5 px-2.5 disabled:opacity-30"
                 title="Send (Enter)"
               >

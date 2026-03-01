@@ -8,13 +8,26 @@ import {
   GitCommit,
   ActivePanel,
   BottomPanel,
+  LLMModel,
 } from '../types';
 import { api } from '../services/api';
+
+interface Repository {
+  id: string;
+  name: string;
+  path: string;
+  lastAccessedAt: string;
+}
 
 interface AgentState {
   // Session
   sessionId: string | null;
   mode: AgentMode;
+
+  // Model
+  selectedModel: string;
+  availableModels: LLMModel[];
+  isLoadingModels: boolean;
 
   // Chat
   messages: ChatMessage[];
@@ -23,6 +36,9 @@ interface AgentState {
   currentPlan: ExecutionPlan | null;
 
   // Workspace
+  currentRepoId: string | null;
+  currentRepoName: string | null;
+  repositories: Repository[];
   rootPath: string;
   files: FileNode[];
   activeFile: string | null;
@@ -42,8 +58,10 @@ interface AgentState {
 
   // Actions
   initSession: (rootPath?: string) => Promise<void>;
-  sendMessage: (message: string) => Promise<void>;
+  sendMessage: (message: string, images?: string[]) => Promise<void>;
   setMode: (mode: AgentMode) => Promise<void>;
+  setSelectedModel: (model: string) => void;
+  loadModels: () => Promise<void>;
   approvePlan: () => Promise<void>;
   rejectPlan: () => void;
   openFile: (path: string) => Promise<void>;
@@ -56,16 +74,24 @@ interface AgentState {
   setActivePanel: (panel: ActivePanel) => void;
   setBottomPanel: (panel: BottomPanel) => void;
   setPreviewUrl: (url: string | null) => void;
+  loadRepositories: () => Promise<void>;
+  selectRepository: (repoId: string, repoPath: string) => Promise<void>;
 }
 
 export const useAgentStore = create<AgentState>((set, get) => ({
   // Initial state
   sessionId: null,
   mode: 'PLAN',
+  selectedModel: 'anthropic/claude-sonnet-4',
+  availableModels: [],
+  isLoadingModels: false,
   messages: [],
   isStreaming: false,
   streamBuffer: '',
   currentPlan: null,
+  currentRepoId: null,
+  currentRepoName: null,
+  repositories: [],
   rootPath: '',
   files: [],
   activeFile: null,
@@ -87,12 +113,37 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       // Load initial workspace state
       await get().refreshFiles();
       await get().refreshGitStatus();
+      await get().loadModels();
     } catch (error) {
       console.error('Failed to init session:', error);
     }
   },
 
-  sendMessage: async (message: string) => {
+  loadModels: async () => {
+    set({ isLoadingModels: true });
+    try {
+      const data = await api.getModels();
+      set({ 
+        availableModels: data.models,
+        selectedModel: data.defaultModel || 'anthropic/claude-sonnet-4',
+        isLoadingModels: false,
+      });
+    } catch (error) {
+      console.error('Failed to load models:', error);
+      set({ isLoadingModels: false });
+    }
+  },
+
+  setSelectedModel: (model: string) => {
+    set({ selectedModel: model });
+    // Persist to session if needed
+    const { sessionId } = get();
+    if (sessionId) {
+      api.setModel(sessionId, model).catch(console.error);
+    }
+  },
+
+  sendMessage: async (message: string, images?: string[]) => {
     const { sessionId } = get();
     if (!sessionId || get().isStreaming) return;
 
@@ -100,6 +151,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       id: crypto.randomUUID(),
       role: 'user',
       content: message,
+      images,
       timestamp: new Date().toISOString(),
     };
 
@@ -117,13 +169,27 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }));
 
     try {
-      await api.streamMessage(sessionId, message, (chunk) => {
-        if (chunk.type === 'chunk') {
+      await api.streamMessage(sessionId, message, images, (chunk) => {
+        if (chunk.type === 'chunk' && chunk.content) {
           set((state) => {
             const msgs = [...state.messages];
             const last = msgs[msgs.length - 1];
             if (last && last.id === assistantMsg.id) {
-              last.content += chunk.content;
+               if (typeof chunk.content === 'string') {
+                  last.content += chunk.content;
+               } else if (chunk.content && typeof chunk.content === 'object' && chunk.content.type === 'tool') {
+                  if (!last.metadata) last.metadata = {};
+                  if (!last.metadata.toolCalls) last.metadata.toolCalls = [];
+                  
+                  const tools = last.metadata.toolCalls as any[];
+                  const existingIdx = tools.findIndex(t => t.toolCallId === (chunk.content as any).toolCallId && t.toolName === (chunk.content as any).toolName);
+                  
+                  if (existingIdx >= 0) {
+                     tools[existingIdx] = { ...tools[existingIdx], ...chunk.content };
+                  } else {
+                     tools.push(chunk.content);
+                  }
+               }
             }
             return { messages: msgs };
           });
@@ -304,4 +370,33 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   setActivePanel: (panel: ActivePanel) => set({ activePanel: panel }),
   setBottomPanel: (panel: BottomPanel) => set({ bottomPanel: panel }),
   setPreviewUrl: (url: string | null) => set({ previewUrl: url, showPreview: url !== null }),
+
+  loadRepositories: async () => {
+    try {
+      const response = await api.getRepos();
+      set({ repositories: response.repos });
+    } catch (error) {
+      console.error('Failed to load repositories:', error);
+    }
+  },
+
+  selectRepository: async (repoId: string, repoPath: string) => {
+    const { repositories } = get();
+    const repo = repositories.find(r => r.id === repoId);
+
+    set({
+      currentRepoId: repoId,
+      currentRepoName: repo?.name || repoPath.split(/[\\/]/).pop() || '',
+      rootPath: repoPath,
+      files: [],
+      activeFile: null,
+      openFiles: [],
+      fileContents: new Map(),
+      gitStatus: null,
+      gitLog: [],
+      gitBranches: null,
+    });
+
+    await get().initSession(repoPath);
+  },
 }));

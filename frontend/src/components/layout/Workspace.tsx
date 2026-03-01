@@ -28,7 +28,7 @@ export function Workspace() {
   const { initSession, bottomPanel, setBottomPanel, showPreview } = useAgentStore();
 
   useEffect(() => {
-    initSession(process.env.VITE_WORKSPACE_ROOT || '/tmp/workspace');
+    initSession(import.meta.env.VITE_WORKSPACE_ROOT || '/tmp/workspace');
   }, [initSession]);
 
   const toggleBottomPanel = (panel: BottomPanel) => {
