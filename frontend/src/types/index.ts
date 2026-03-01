@@ -15,6 +15,16 @@ export interface ChatMessage {
   };
 }
 
+export interface ChatAttachment {
+  name: string;
+  mimeType: string;
+  /**
+   * Data URL (preferred) or raw base64.
+   * Example: "data:application/pdf;base64,...."
+   */
+  data: string;
+}
+
 export interface PlanStep {
   id: string;
   order: number;

@@ -41,12 +41,13 @@ export const api = {
     sessionId: string,
     message: string,
     images: string[] | undefined,
+    attachments: import('../types').ChatAttachment[] | undefined,
     onChunk: (chunk: StreamChunk) => void
   ): Promise<void> => {
     const res = await fetch(`${BASE_URL}/agent/sessions/${sessionId}/message`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message, images }),
+      body: JSON.stringify({ message, images, attachments }),
     });
 
     if (!res.ok) throw new Error(`HTTP ${res.status}`);

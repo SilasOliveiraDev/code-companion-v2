@@ -38,7 +38,12 @@ function getModelCategory(modelId: string): string {
   return 'Other';
 }
 
-export function ModelSelector() {
+interface ModelSelectorProps {
+  compact?: boolean;
+  dropUp?: boolean;
+}
+
+export function ModelSelector({ compact, dropUp }: ModelSelectorProps) {
   const { selectedModel, availableModels, setSelectedModel, isLoadingModels } = useAgentStore();
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -79,32 +84,47 @@ export function ModelSelector() {
   }, {} as Record<string, LLMModel[]>);
 
   const selectedModelObj = availableModels.find((m) => m.id === selectedModel);
+  const selectedLabel = selectedModelObj ? formatModelName(selectedModelObj) : (selectedModel.split('/').pop() || selectedModel);
 
   return (
     <div ref={dropdownRef} className="relative">
       <button
         onClick={() => setIsOpen(!isOpen)}
         disabled={isLoadingModels}
-        className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-surface-2 hover:bg-surface-3 
-                   border border-border-subtle text-xs text-zinc-300 transition-colors
-                   disabled:opacity-50 disabled:cursor-not-allowed min-w-[140px]"
+        title={selectedLabel}
+        aria-label={`Model: ${selectedLabel}`}
+        className={
+          compact
+            ? 'flex items-center justify-center w-9 h-8 rounded-md bg-surface-2 hover:bg-surface-3 border border-border-subtle text-xs text-zinc-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+            : 'flex items-center gap-1.5 px-2 py-1 rounded-md bg-surface-2 hover:bg-surface-3 border border-border-subtle text-xs text-zinc-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed min-w-[140px]'
+        }
       >
         {isLoadingModels ? (
-          <span className="text-zinc-500">Loading...</span>
+          <span className="text-zinc-500">{compact ? '…' : 'Loading...'}</span>
         ) : (
           <>
             {getModelIcon(selectedModel)}
-            <span className="truncate max-w-[100px]">
-              {selectedModelObj ? formatModelName(selectedModelObj) : selectedModel.split('/').pop()}
-            </span>
-            <ChevronDown size={12} className="text-zinc-500 ml-auto flex-shrink-0" />
+            {!compact && (
+              <>
+                <span className="truncate max-w-[100px]">
+                  {selectedLabel}
+                </span>
+                <ChevronDown size={12} className="text-zinc-500 ml-auto flex-shrink-0" />
+              </>
+            )}
           </>
         )}
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 top-full mt-1 w-64 bg-surface-2 border border-border-subtle 
-                        rounded-lg shadow-xl z-50 overflow-hidden">
+        <div
+          className={
+            (dropUp
+              ? 'absolute right-0 bottom-full mb-1'
+              : 'absolute right-0 top-full mt-1') +
+            ' w-64 bg-surface-2 border border-border-subtle rounded-lg shadow-xl z-50 overflow-hidden'
+          }
+        >
           {/* Search */}
           <div className="p-2 border-b border-border-subtle">
             <input

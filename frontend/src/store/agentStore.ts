@@ -9,6 +9,7 @@ import {
   ActivePanel,
   BottomPanel,
   LLMModel,
+  ChatAttachment,
 } from '../types';
 import { api } from '../services/api';
 
@@ -58,7 +59,7 @@ interface AgentState {
 
   // Actions
   initSession: (rootPath?: string) => Promise<void>;
-  sendMessage: (message: string, images?: string[]) => Promise<void>;
+  sendMessage: (message: string, images?: string[], attachments?: ChatAttachment[]) => Promise<void>;
   setMode: (mode: AgentMode) => Promise<void>;
   setSelectedModel: (model: string) => void;
   loadModels: () => Promise<void>;
@@ -144,7 +145,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }
   },
 
-  sendMessage: async (message: string, images?: string[]) => {
+  sendMessage: async (message: string, images?: string[], attachments?: ChatAttachment[]) => {
     const { sessionId } = get();
     if (!sessionId || get().isStreaming) return;
 
@@ -170,7 +171,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }));
 
     try {
-      await api.streamMessage(sessionId, message, images, (chunk) => {
+      await api.streamMessage(sessionId, message, images, attachments, (chunk) => {
         if (chunk.type === 'chunk' && chunk.content) {
           set((state) => {
             const msgs = [...state.messages];

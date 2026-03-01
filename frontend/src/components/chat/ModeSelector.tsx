@@ -6,6 +6,7 @@ interface ModeSelectorProps {
   mode: AgentMode;
   onChange: (mode: AgentMode) => void;
   disabled?: boolean;
+  iconOnly?: boolean;
 }
 
 const MODES: {
@@ -38,17 +39,22 @@ const MODES: {
   },
 ];
 
-export function ModeSelector({ mode, onChange, disabled }: ModeSelectorProps) {
+export function ModeSelector({ mode, onChange, disabled, iconOnly }: ModeSelectorProps) {
   return (
-    <div className="flex items-center gap-1 p-1 bg-surface-0 rounded-lg border border-border-subtle">
+    <div className={
+      iconOnly
+        ? 'flex items-center gap-1 p-1 bg-surface-0 rounded-lg border border-border-subtle'
+        : 'flex items-center gap-1 p-1 bg-surface-0 rounded-lg border border-border-subtle'
+    }>
       {MODES.map((m) => (
         <button
           key={m.value}
           onClick={() => onChange(m.value)}
           disabled={disabled}
           title={m.description}
+          aria-label={m.label}
           className={`
-            flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-all
+            flex items-center ${iconOnly ? 'gap-0 px-2 py-1' : 'gap-1.5 px-2.5 py-1'} rounded-md text-xs font-medium transition-all
             disabled:opacity-50 disabled:cursor-not-allowed
             ${mode === m.value
               ? `bg-surface-3 ${m.color}`
@@ -57,7 +63,7 @@ export function ModeSelector({ mode, onChange, disabled }: ModeSelectorProps) {
           `}
         >
           {m.icon}
-          {m.label}
+          {!iconOnly && m.label}
         </button>
       ))}
     </div>

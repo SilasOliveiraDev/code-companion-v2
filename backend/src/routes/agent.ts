@@ -2,6 +2,84 @@ import { Router, Request, Response } from 'express';
 import { AIEngineerAgent } from '../agent';
 import { AgentMode, WorkspaceState } from '../types';
 import { ToolRouter, MCP_TOOLS } from '../mcp/toolRouter';
+import pdfParse from 'pdf-parse';
+
+type ChatAttachment = {
+  name: string;
+  mimeType: string;
+  data: string; // data URL preferred, else raw base64
+};
+
+function parseDataUrl(data: string): { mimeType?: string; base64: string } {
+  const trimmed = (data || '').trim();
+  if (!trimmed.startsWith('data:')) {
+    return { base64: trimmed };
+  }
+
+  // data:<mime>;base64,<payload>
+  const match = /^data:([^;]+);base64,(.*)$/i.exec(trimmed);
+  if (!match) return { base64: trimmed };
+  return { mimeType: match[1], base64: match[2] };
+}
+
+function isLikelyBase64(data: string): boolean {
+  const s = (data || '').trim();
+  if (!s) return false;
+  if (s.startsWith('data:')) return true;
+  return /^[a-z0-9+/\n\r]+={0,2}$/i.test(s);
+}
+
+function safeBase64ToBuffer(data: string): Buffer | null {
+  if (!isLikelyBase64(data)) return null;
+  const { base64 } = parseDataUrl(data);
+  try {
+    return Buffer.from(base64, 'base64');
+  } catch {
+    return null;
+  }
+}
+
+async function extractPdfTextFromAttachments(attachments: ChatAttachment[]): Promise<string> {
+  const MAX_FILES = 3;
+  const MAX_BYTES_PER_FILE = 5 * 1024 * 1024; // 5MB
+  const MAX_CHARS_PER_FILE = 20_000;
+
+  const pdfs = attachments
+    .filter((a) => (a.mimeType === 'application/pdf') || a.data.startsWith('data:application/pdf'))
+    .slice(0, MAX_FILES);
+
+  const parts: string[] = [];
+
+  for (const att of pdfs) {
+    const buffer = safeBase64ToBuffer(att.data);
+    if (!buffer) continue;
+    if (buffer.byteLength > MAX_BYTES_PER_FILE) {
+      parts.push(`[${att.name}] (skipped: file too large)`);
+      continue;
+    }
+
+    try {
+      const parsed = await pdfParse(buffer);
+      const text = (parsed.text || '').replace(/\s+\n/g, '\n').trim();
+      const clipped = text.length > MAX_CHARS_PER_FILE ? `${text.slice(0, MAX_CHARS_PER_FILE)}\n…(truncated)` : text;
+      if (clipped) {
+        parts.push(`[${att.name}]\n${clipped}`);
+      }
+    } catch (e) {
+      parts.push(`[${att.name}] (failed to parse PDF)`);
+    }
+  }
+
+  if (parts.length === 0) return '';
+  return `\n\n---\nAttached PDFs (extracted text):\n\n${parts.join('\n\n---\n\n')}\n---\n`;
+}
+
+function mergeImageAttachments(images: string[] | undefined, attachments: ChatAttachment[] | undefined): string[] | undefined {
+  const base = Array.isArray(images) ? images : [];
+  const extra = (attachments || []).filter(a => a.mimeType.startsWith('image/') || a.data.startsWith('data:image/')).map(a => a.data);
+  const merged = [...base, ...extra].filter(Boolean);
+  return merged.length > 0 ? merged : undefined;
+}
 
 const router = Router();
 const agent = new AIEngineerAgent();
@@ -51,10 +129,12 @@ router.get('/sessions/:id', async (req: Request, res: Response) => {
 
 // POST /api/agent/sessions/:id/message - Send message to agent
 router.post('/sessions/:id/message', async (req: Request, res: Response) => {
-  const { message, images } = req.body as { message: string, images?: string[] };
+  const { message, images, attachments } = req.body as { message: string, images?: string[]; attachments?: ChatAttachment[] };
 
-  if (!message?.trim() && (!images || images.length === 0)) {
-    res.status(400).json({ error: 'Message or images are required' });
+  const hasImages = Array.isArray(images) && images.length > 0;
+  const hasAttachments = Array.isArray(attachments) && attachments.length > 0;
+  if (!message?.trim() && !hasImages && !hasAttachments) {
+    res.status(400).json({ error: 'Message, images, or attachments are required' });
     return;
   }
 
@@ -70,10 +150,14 @@ router.post('/sessions/:id/message', async (req: Request, res: Response) => {
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
 
+    const mergedImages = mergeImageAttachments(images, attachments);
+    const pdfText = hasAttachments ? await extractPdfTextFromAttachments(attachments!) : '';
+    const fullMessage = pdfText ? `${message || ''}${pdfText}` : (message || '');
+
     const result = await agent.processMessage(
       req.params.id,
-      message,
-      images,
+      fullMessage,
+      mergedImages,
       (chunk) => {
         res.write(`data: ${JSON.stringify({ type: 'chunk', content: chunk })}\n\n`);
       }

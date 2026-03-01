@@ -1,9 +1,10 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { Send, Square, RotateCcw, ChevronDown, X } from 'lucide-react';
+import { Send, Square, RotateCcw, ChevronDown, X, Paperclip, Plus, FileText } from 'lucide-react';
 import { useAgentStore } from '../../store/agentStore';
 import { ChatMessageComponent } from './ChatMessage';
 import { ModeSelector } from './ModeSelector';
 import { ModelSelector } from './ModelSelector';
+import { ChatAttachment } from '../../types';
 
 export function ChatPanel() {
   const {
@@ -19,10 +20,12 @@ export function ChatPanel() {
 
   const [input, setInput] = useState('');
   const [images, setImages] = useState<string[]>([]);
+  const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const scrollToBottom = useCallback(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -73,14 +76,57 @@ export function ChatPanel() {
     setImages(prev => prev.filter((_, i) => i !== index));
   };
 
+  const handleRemoveAttachment = (index: number) => {
+    setAttachments(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handlePickFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+
+    const nextImages: string[] = [];
+    const nextAttachments: ChatAttachment[] = [];
+
+    for (const file of Array.from(files)) {
+      const mimeType = file.type || '';
+      const isImage = mimeType.startsWith('image/');
+      const isPdf = mimeType === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+      if (!isImage && !isPdf) continue;
+
+      try {
+        const data = await toBase64(file);
+        if (isImage) {
+          nextImages.push(data);
+        } else {
+          nextAttachments.push({ name: file.name, mimeType: 'application/pdf', data });
+        }
+      } catch (error) {
+        console.error('Failed to read attachment', error);
+      }
+    }
+
+    if (nextImages.length > 0) setImages(prev => [...prev, ...nextImages]);
+    if (nextAttachments.length > 0) setAttachments(prev => [...prev, ...nextAttachments]);
+  };
+
+  const openFilePicker = () => {
+    if (isStreaming) return;
+    fileInputRef.current?.click();
+  };
+
   const handleSend = async () => {
     const trimmed = input.trim();
-    if ((!trimmed && images.length === 0) || isStreaming) return;
+    if ((!trimmed && images.length === 0 && attachments.length === 0) || isStreaming) return;
     setInput('');
     const currentImages = [...images];
+    const currentAttachments = [...attachments];
     setImages([]);
+    setAttachments([]);
     inputRef.current?.focus();
-    await sendMessage(trimmed, currentImages.length > 0 ? currentImages : undefined);
+    await sendMessage(
+      trimmed,
+      currentImages.length > 0 ? currentImages : undefined,
+      currentAttachments.length > 0 ? currentAttachments : undefined
+    );
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -120,10 +166,7 @@ export function ChatPanel() {
             </div>
           )}
         </div>
-        <div className="flex items-center gap-2">
-          <ModelSelector />
-          <ModeSelector mode={mode} onChange={setMode} disabled={isStreaming} />
-        </div>
+        <div className="flex items-center gap-2" />
       </div>
 
       {/* Messages */}
@@ -217,14 +260,31 @@ export function ChatPanel() {
 
       {/* Input area */}
       <div className="flex-shrink-0 border-t border-border-subtle p-3">
-        {images.length > 0 && (
+        {(images.length > 0 || attachments.length > 0) && (
           <div className="flex gap-2 flex-wrap mb-2">
             {images.map((img, i) => (
-              <div key={i} className="relative group">
+              <div key={`img-${i}`} className="relative group">
                 <img src={img} alt="Pasted" className="h-16 w-auto rounded-md border border-border object-contain bg-surface-2" />
                 <button
                   onClick={() => handleRemoveImage(i)}
                   className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-surface-3 border border-border rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-surface-4"
+                  title="Remove"
+                >
+                  <X size={10} className="text-zinc-300" />
+                </button>
+              </div>
+            ))}
+
+            {attachments.map((att, i) => (
+              <div key={`att-${i}`} className="relative group">
+                <div className="h-16 max-w-[220px] px-3 flex items-center gap-2 rounded-md border border-border bg-surface-2">
+                  <FileText size={14} className="text-zinc-400 shrink-0" />
+                  <span className="text-xs text-zinc-300 truncate">{att.name}</span>
+                </div>
+                <button
+                  onClick={() => handleRemoveAttachment(i)}
+                  className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-surface-3 border border-border rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-surface-4"
+                  title="Remove"
                 >
                   <X size={10} className="text-zinc-300" />
                 </button>
@@ -232,7 +292,43 @@ export function ChatPanel() {
             ))}
           </div>
         )}
-        <div className="flex gap-2 items-end bg-surface-2 rounded-xl border border-border focus-within:border-accent/50 transition-colors p-2">
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept="image/*,application/pdf"
+          className="hidden"
+          onChange={(e) => {
+            void handlePickFiles(e.target.files);
+            e.currentTarget.value = '';
+          }}
+        />
+
+        <div className="flex items-end gap-2 bg-surface-2 rounded-xl border border-border focus-within:border-accent/50 transition-colors p-2">
+          <div className="flex items-center gap-1 pb-0.5">
+            <button
+              type="button"
+              onClick={openFilePicker}
+              disabled={isStreaming}
+              className="btn-ghost p-1.5 disabled:opacity-40"
+              title="Attach (images/PDF)"
+              aria-label="Attach"
+            >
+              <Paperclip size={14} className="text-zinc-400" />
+            </button>
+            <button
+              type="button"
+              onClick={openFilePicker}
+              disabled={isStreaming}
+              className="btn-ghost p-1.5 disabled:opacity-40"
+              title="Add attachment"
+              aria-label="Add attachment"
+            >
+              <Plus size={14} className="text-zinc-400" />
+            </button>
+          </div>
+
           <textarea
             ref={inputRef}
             value={input}
@@ -243,23 +339,46 @@ export function ChatPanel() {
               mode === 'ASK'
                 ? 'Ask a question about your codebase...'
                 : mode === 'PLAN'
-                  ? 'Describe what you want to build...'
+                  ? 'Describe what to build next'
                   : 'Give the agent a task to execute...'
             }
             rows={1}
             className="flex-1 bg-transparent text-sm text-white placeholder-zinc-500 resize-none focus:outline-none leading-relaxed min-h-[24px] max-h-[160px]"
           />
+
           <div className="flex items-center gap-1 flex-shrink-0 pb-0.5">
+            {(input.trim() || images.length > 0 || attachments.length > 0) && (
+              <button
+                type="button"
+                className="btn-ghost p-1.5 disabled:opacity-40"
+                onClick={() => {
+                  setInput('');
+                  setImages([]);
+                  setAttachments([]);
+                  inputRef.current?.focus();
+                }}
+                disabled={isStreaming}
+                title="Clear"
+                aria-label="Clear"
+              >
+                <RotateCcw size={14} className="text-zinc-400" />
+              </button>
+            )}
+
+            <ModeSelector mode={mode} onChange={setMode} disabled={isStreaming} iconOnly />
+            <ModelSelector compact dropUp />
+
             {isStreaming ? (
-              <button className="btn-ghost p-1.5" title="Stop generation">
+              <button className="btn-ghost p-1.5" title="Stop generation" aria-label="Stop">
                 <Square size={14} className="text-error" />
               </button>
             ) : (
               <button
                 onClick={handleSend}
-                disabled={!input.trim() && images.length === 0}
+                disabled={!input.trim() && images.length === 0 && attachments.length === 0}
                 className="btn-primary py-1.5 px-2.5 disabled:opacity-30"
                 title="Send (Enter)"
+                aria-label="Send"
               >
                 <Send size={13} />
               </button>
@@ -270,10 +389,6 @@ export function ChatPanel() {
           <span className="text-[10px] text-zinc-600">
             Shift+Enter for new line · Enter to send
           </span>
-          <button className="btn-ghost py-0.5 px-1.5 text-[10px] gap-1">
-            <RotateCcw size={10} />
-            Clear
-          </button>
         </div>
       </div>
     </div>
