@@ -11,6 +11,7 @@ import { CodeEditor } from '../editor/CodeEditor';
 import { ChatPanel } from '../chat/ChatPanel';
 import { PreviewPanel } from '../preview/PreviewPanel';
 import { TerminalPanel } from '../terminal/TerminalPanel';
+import { UserProfile } from './UserProfile';
 import { BottomPanel } from '../../types';
 
 function ResizeHandle({ direction = 'horizontal' }: { direction?: 'horizontal' | 'vertical' }) {
@@ -52,24 +53,30 @@ export function Workspace() {
           <StatusIndicator />
         </div>
 
-        {/* Bottom panel toggles */}
-        <div className="flex items-center gap-1">
-          <button
-            onClick={() => toggleBottomPanel('terminal')}
-            className={`btn-ghost text-xs gap-1 ${bottomPanel === 'terminal' ? 'text-white bg-surface-3' : ''}`}
-          >
-            <Terminal size={12} />
-            Terminal
-            {bottomPanel === 'terminal' ? <ChevronDown size={10} /> : <ChevronUp size={10} />}
-          </button>
-          <button
-            onClick={() => toggleBottomPanel('preview')}
-            className={`btn-ghost text-xs gap-1 ${bottomPanel === 'preview' ? 'text-white bg-surface-3' : ''}`}
-          >
-            <Monitor size={12} />
-            Preview
-            {bottomPanel === 'preview' ? <ChevronDown size={10} /> : <ChevronUp size={10} />}
-          </button>
+        {/* User Profile and Bottom panel toggles */}
+        <div className="flex items-center gap-3">
+          {/* User Profile */}
+          <UserProfile userName="Silas" userEmail="demo@demo.com" />
+          
+          {/* Bottom panel toggles */}
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => toggleBottomPanel('terminal')}
+              className={`btn-ghost text-xs gap-1 ${bottomPanel === 'terminal' ? 'text-white bg-surface-3' : ''}`}
+            >
+              <Terminal size={12} />
+              Terminal
+              {bottomPanel === 'terminal' ? <ChevronDown size={10} /> : <ChevronUp size={10} />}
+            </button>
+            <button
+              onClick={() => toggleBottomPanel('preview')}
+              className={`btn-ghost text-xs gap-1 ${bottomPanel === 'preview' ? 'text-white bg-surface-3' : ''}`}
+            >
+              <Monitor size={12} />
+              Preview
+              {bottomPanel === 'preview' ? <ChevronDown size={10} /> : <ChevronUp size={10} />}
+            </button>
+          </div>
         </div>
       </div>
 
