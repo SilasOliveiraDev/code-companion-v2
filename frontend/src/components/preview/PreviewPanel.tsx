@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { RefreshCw, ExternalLink, Monitor, X } from 'lucide-react';
 import { useAgentStore } from '../../store/agentStore';
 

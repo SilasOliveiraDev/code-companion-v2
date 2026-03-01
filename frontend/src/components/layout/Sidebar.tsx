@@ -1,4 +1,4 @@
-import React from 'react';
+import { useState } from 'react';
 import { Files, GitBranch, Search, Settings } from 'lucide-react';
 import { useAgentStore } from '../../store/agentStore';
 import { FileExplorer } from '../explorer/FileExplorer';
@@ -72,10 +72,9 @@ export function Sidebar() {
 }
 
 function SearchPanel() {
-  const [query, setQuery] = React.useState('');
-  const [results, setResults] = React.useState<string[]>([]);
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<string[]>([]);
   const { rootPath, openFile } = useAgentStore();
-  const { api } = React.useMemo(() => ({ api: null as null }), []); // placeholder
 
   const handleSearch = async () => {
     if (!query.trim()) return;

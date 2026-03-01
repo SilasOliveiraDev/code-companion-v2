@@ -2,7 +2,7 @@ import React from 'react';
 import { Bot, User } from 'lucide-react';
 import { ChatMessage as ChatMessageType, ExecutionPlan } from '../../types';
 import { PlanCard } from './PlanCard';
-import { ToolExecutionCard, ToolExecuteStatus, FileChange } from './ToolExecutionCard';
+import { ToolExecutionCard, FileChange } from './ToolExecutionCard';
 
 interface ChatMessageProps {
   message: ChatMessageType;

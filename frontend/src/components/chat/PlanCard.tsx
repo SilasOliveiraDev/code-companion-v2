@@ -36,7 +36,6 @@ const STATUS_ICONS: Record<string, React.ReactNode> = {
 
 export function PlanCard({ plan, onApprove, onReject }: PlanCardProps) {
   const isExecuting = plan.status === 'executing';
-  const isCompleted = plan.status === 'completed' || plan.status === 'failed';
   const canAct = plan.status === 'pending';
 
   return (

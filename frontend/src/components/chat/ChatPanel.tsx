@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { Send, Square, RotateCcw, ChevronDown, Image as ImageIcon, X } from 'lucide-react';
+import { Send, Square, RotateCcw, ChevronDown, X } from 'lucide-react';
 import { useAgentStore } from '../../store/agentStore';
 import { ChatMessageComponent } from './ChatMessage';
 import { ModeSelector } from './ModeSelector';
@@ -165,8 +165,7 @@ export function ChatPanel() {
         )}
 
         {messages.map((msg, idx) => {
-          const isPlanMessage =
-            msg.role === 'assistant' &&
+                      msg.role === 'assistant' &&
             currentPlan &&
             msg.metadata?.planId === currentPlan.id &&
             hasPlanMessage &&

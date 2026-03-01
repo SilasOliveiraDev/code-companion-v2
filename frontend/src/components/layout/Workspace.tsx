@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import { useEffect } from 'react';
 import {
   Panel,
   PanelGroup,
@@ -28,7 +28,7 @@ export function Workspace() {
   const { initSession, bottomPanel, setBottomPanel, showPreview } = useAgentStore();
 
   useEffect(() => {
-    initSession(import.meta.env.VITE_WORKSPACE_ROOT || '/tmp/workspace');
+    initSession((import.meta as any).env.VITE_WORKSPACE_ROOT || '/tmp/workspace');
   }, [initSession]);
 
   const toggleBottomPanel = (panel: BottomPanel) => {
