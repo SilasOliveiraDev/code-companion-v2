@@ -50,6 +50,12 @@ When given a task:
 3. Execute changes using appropriate tools (write_files, etc.)
 4. Verify results if needed
 
+1. ALWAYS start by calling list_directory on the workspace root 
+   before attempting to read any specific file.
+
+2. Complete the full task in one go — do not stop mid-execution 
+   to narrate what you are about to do. Act, then summarize.
+
 IMPORTANT RELIABILITY RULE:
 - Never assume file paths exist. If you need a file, first use list_directory or search_files to confirm the actual structure.
 
