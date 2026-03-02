@@ -38,6 +38,12 @@ function getModelCategory(modelId: string): string {
   return 'Other';
 }
 
+function formatContextLabel(model: LLMModel): string {
+  if (!model.context_length) return '';
+  const k = Math.round(model.context_length / 1000);
+  return `${k}K`;
+}
+
 interface ModelSelectorProps {
   compact?: boolean;
   dropUp?: boolean;
@@ -75,13 +81,12 @@ export function ModelSelector({ compact, dropUp }: ModelSelectorProps) {
     );
   });
 
-  // Group models by category
-  const groupedModels = filteredModels.reduce((acc, model) => {
-    const category = getModelCategory(model.id);
-    if (!acc[category]) acc[category] = [];
-    acc[category].push(model);
-    return acc;
-  }, {} as Record<string, LLMModel[]>);
+  const sortedModels = [...filteredModels].sort((a, b) => {
+    const aCat = getModelCategory(a.id);
+    const bCat = getModelCategory(b.id);
+    if (aCat !== bCat) return aCat.localeCompare(bCat);
+    return (a.name || a.id).localeCompare(b.name || b.id);
+  });
 
   const selectedModelObj = availableModels.find((m) => m.id === selectedModel);
   const selectedLabel = selectedModelObj ? formatModelName(selectedModelObj) : (selectedModel.split('/').pop() || selectedModel);
@@ -122,7 +127,7 @@ export function ModelSelector({ compact, dropUp }: ModelSelectorProps) {
             (dropUp
               ? 'absolute right-0 bottom-full mb-1'
               : 'absolute right-0 top-full mt-1') +
-            ' w-64 bg-surface-2 border border-border-subtle rounded-lg shadow-xl z-50 overflow-hidden'
+            ' w-72 bg-surface-2 border border-border-subtle rounded-md shadow-xl z-50 overflow-hidden'
           }
         >
           {/* Search */}
@@ -139,47 +144,41 @@ export function ModelSelector({ compact, dropUp }: ModelSelectorProps) {
           </div>
 
           {/* Models list */}
-          <div className="max-h-80 overflow-y-auto">
-            {Object.entries(groupedModels).length === 0 ? (
-              <div className="p-4 text-center text-xs text-zinc-500">
-                No models found
-              </div>
+          <div className="max-h-80 overflow-y-auto divide-y divide-border-subtle">
+            {sortedModels.length === 0 ? (
+              <div className="p-4 text-center text-xs text-zinc-500">No models found</div>
             ) : (
-              Object.entries(groupedModels).map(([category, models]) => (
-                <div key={category}>
-                  <div className="px-3 py-1.5 text-[10px] font-semibold text-zinc-500 uppercase tracking-wider bg-surface-1">
-                    {category}
-                  </div>
-                  {models.map((model) => (
-                    <button
-                      key={model.id}
-                      onClick={() => {
-                        setSelectedModel(model.id);
-                        setIsOpen(false);
-                        setSearch('');
-                      }}
-                      className={`w-full flex items-center gap-2 px-3 py-2 text-left text-xs 
-                                  hover:bg-surface-3 transition-colors
-                                  ${model.id === selectedModel ? 'bg-accent/10 text-accent-light' : 'text-zinc-300'}`}
-                    >
-                      {getModelIcon(model.id)}
-                      <div className="flex-1 min-w-0">
-                        <div className="truncate font-medium">
-                          {formatModelName(model)}
-                        </div>
-                        {model.context_length && (
-                          <div className="text-[10px] text-zinc-500">
-                            {(model.context_length / 1000).toFixed(0)}K context
-                          </div>
-                        )}
-                      </div>
-                      {model.id === selectedModel && (
-                        <Check size={14} className="text-accent flex-shrink-0" />
-                      )}
-                    </button>
-                  ))}
-                </div>
-              ))
+              sortedModels.map((model) => {
+                const isSelected = model.id === selectedModel;
+                const rightLabel = formatContextLabel(model);
+                return (
+                  <button
+                    key={model.id}
+                    onClick={() => {
+                      setSelectedModel(model.id);
+                      setIsOpen(false);
+                      setSearch('');
+                    }}
+                    className={
+                      'w-full flex items-center gap-2 px-2.5 py-2 text-left text-xs ' +
+                      'hover:bg-surface-3 transition-colors ' +
+                      (isSelected ? 'bg-surface-3 text-white' : 'text-zinc-300')
+                    }
+                    title={model.id}
+                    aria-label={`Select model ${formatModelName(model)}`}
+                  >
+                    <span className="w-4 flex items-center justify-center flex-shrink-0">
+                      {isSelected ? <Check size={14} className="text-accent" /> : null}
+                    </span>
+                    <span className="flex-1 min-w-0 truncate">
+                      {formatModelName(model)}
+                    </span>
+                    <span className="text-[11px] text-zinc-500 tabular-nums flex-shrink-0">
+                      {rightLabel}
+                    </span>
+                  </button>
+                );
+              })
             )}
           </div>
         </div>
