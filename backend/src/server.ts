@@ -1,3 +1,4 @@
+
 import dotenv from 'dotenv';
 dotenv.config();
 
@@ -13,6 +14,7 @@ import workspaceRoutes from './routes/workspace';
 import gitRoutes from './routes/git';
 import openrouterRoutes from './routes/openrouter';
 import supabaseRoutes from './routes/supabase';
+import authRoutes from './routes/auth'; // Import auth routes
 
 const app = express();
 const httpServer = createServer(app);
@@ -41,6 +43,7 @@ app.use('/api/workspace', workspaceRoutes);
 app.use('/api/git', gitRoutes);
 app.use('/api/openrouter', openrouterRoutes);
 app.use('/api/supabase', supabaseRoutes);
+app.use('/api/auth', authRoutes); // Use auth routes
 
 // Health check
 app.get('/api/health', (_req, res) => {
