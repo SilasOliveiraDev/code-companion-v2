@@ -54,6 +54,50 @@ function parseSSEStream(reader: ReadableStreamDefaultReader<Uint8Array>, onChunk
 }
 
 export const api = {
+  // Authentication
+  login: (email: string, password: string) =>
+    request<{ message: string; data: { session: any; user: any } }>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    }),
+
+  signup: (email: string, password: string) =>
+    request<{ message: string; data: { session: any; user: any } }>('/auth/signup', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    }),
+
+  getProfile: (token: string) =>
+    request<{
+      id: string;
+      email: string;
+      name: string;
+      avatar?: string;
+      created_at: string;
+      last_sign_in_at: string;
+    }>('/auth/profile', {
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+    }),
+
+  updateProfile: (token: string, data: { name?: string; avatar_url?: string }) =>
+    request<{
+      id: string;
+      email: string;
+      name: string;
+      avatar?: string;
+      updated_at: string;
+    }>('/auth/profile', {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify(data),
+    }),
+
   // Agent sessions
   createSession: (rootPath: string, mode: AgentMode) =>
     request<{ sessionId: string; mode: AgentMode; createdAt: string }>('/agent/sessions', {

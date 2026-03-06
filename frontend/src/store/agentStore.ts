@@ -21,6 +21,16 @@ interface Repository {
 }
 
 interface AgentState {
+  // Authentication
+  user: {
+    id: string;
+    email: string;
+    name: string;
+    avatar?: string;
+  } | null;
+  authToken: string | null;
+  isAuthenticated: boolean;
+  isAuthLoading: boolean;
   // Session
   sessionId: string | null;
   mode: AgentMode;
@@ -82,6 +92,10 @@ interface AgentState {
 
 export const useAgentStore = create<AgentState>((set, get) => ({
   // Initial state
+  user: null,
+  authToken: null,
+  isAuthenticated: false,
+  isAuthLoading: false,
   sessionId: null,
   mode: 'PLAN',
   selectedModel: 'anthropic/claude-sonnet-4',

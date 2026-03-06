@@ -107,6 +107,11 @@ Do NOT say you cannot access files - you CAN and SHOULD use the tools available 
 Do not make destructive changes (write, delete, move) in this mode — only read and provide information.`;
 
 const AGENT_SYSTEM_PROMPT = `You are a senior full-stack software engineer with autonomous development capabilities.
+
+LANGUAGE RULE: Always respond in the same language the user is writing. If the user writes in Portuguese, respond entirely in Portuguese. Never switch languages unless the user does first.
+
+EXECUTION RULE: In AGENT mode you EXECUTE tasks immediately using tools. Do NOT ask "Before proceeding" or any clarifying questions before acting. Read the codebase, understand the context, and execute. Only ask a question if it is literally impossible to proceed without information that doesn't exist anywhere in the project.
+
 You have access to powerful tools to interact with the filesystem and manage projects.
 
 IMPORTANT: You MUST use your tools to accomplish tasks. When asked to:
@@ -578,11 +583,12 @@ export class AIEngineerAgent {
   }
 
   private async verifyWithLLM(message: string, session: AgentSession): Promise<boolean> {
-    const classifierPrompt = `You are a message classifier. Determine if the following user message is:
-1. A REQUEST FOR CODE/IMPLEMENTATION (user wants you to build, create, modify, or implement something)
-2. A CONVERSATIONAL MESSAGE (greeting, question, request to change language, simple chat, etc.)
+    const classifierPrompt = `You are a message classifier.
+IMPORTANT: Respond ONLY with "IMPLEMENTATION" or "CONVERSATION" — no other text, no questions, no explanations.
 
-Respond with ONLY "IMPLEMENTATION" or "CONVERSATION" - nothing else.
+Classify the user message below:
+- IMPLEMENTATION = user wants you to build, create, modify, fix or implement something in the codebase
+- CONVERSATION = greeting, question, language change, simple chat
 
 User message: "${message}"`;
 
@@ -605,11 +611,13 @@ User message: "${message}"`;
   private async handleConversation(session: AgentSession, userMessage: string): Promise<string> {
     const sysPrompt = `You are a friendly AI software engineering assistant. You're currently in PLAN mode, which means you can help create execution plans for implementing features.
 
+LANGUAGE RULE: Always respond in the same language the user is writing. If the user writes in Portuguese, respond entirely in Portuguese. Never switch languages unless the user does first.
+
 However, you should respond naturally to conversational messages. If the user wants to chat, answer questions, or asks you to speak in a different language - do that!
 
 When the user asks you to implement, create, build, or modify something, let them know you'll create an execution plan.
 
-Be helpful, concise, and match the user's language (if they speak Portuguese, respond in Portuguese).`;
+Be helpful and concise.`;
 
     const recentMessages = session.messages.slice(-10);
     // Since processMessage pushed the userMessage directly to session.messages, we already have it at the end.
@@ -630,13 +638,6 @@ Be helpful, concise, and match the user's language (if they speak Portuguese, re
     onStream?: (chunk: StreamEvent) => void
   ): Promise<string> {
     const workspaceContext = this.buildWorkspaceContext(session.workspace);
-
-    // --- 5.1: Smart Clarification ---
-    const clarification = await this.maybeClarify(session, userMessage);
-    if (clarification) {
-      onStream?.(clarification);
-      return clarification;
-    }
 
     // --- Project Intelligence context (Fase 3.1) ---
     const intelligenceCtx = session.projectIntelligence
