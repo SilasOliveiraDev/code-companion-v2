@@ -1,8 +1,9 @@
 
 import { Router } from 'express';
-import { supabase } from '../integrations/supabase';
+import { getSupabaseClient } from '../integrations/supabase';
 
 const router = Router();
+const supabase = getSupabaseClient();
 
 // Login
 router.post('/login', async (req, res) => {

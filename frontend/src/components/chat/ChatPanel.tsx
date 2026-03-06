@@ -152,6 +152,24 @@ export function ChatPanel() {
 
   const hasPlanMessage = lastAssistantPlanMessageIndex !== -1;
 
+  const suggestions = {
+    PLAN: [
+      'Criar página de onboarding com 3 etapas',
+      'Adicionar tabela de dados do Supabase no painel',
+      'Criar formulário de configurações com campos de texto',
+    ],
+    AGENT: [
+      'Adicione um campo de busca no FileExplorer',
+      'Crie um componente de lista para exibir sessões salvas',
+      'Adicione um modal de confirmação antes de deletar arquivos',
+    ],
+    ASK: [
+      'Como funciona o fluxo de dados do store até os componentes?',
+      'Quais classes do design system devo usar para botões?',
+      'Como adicionar um novo endpoint no backend?',
+    ],
+  } as const;
+
   return (
     <div className="flex flex-col h-full bg-surface-1">
       {/* Header */}
@@ -190,11 +208,7 @@ export function ChatPanel() {
               </p>
             </div>
             <div className="grid grid-cols-1 gap-2 w-full max-w-xs">
-              {[
-                'Add user authentication with Supabase',
-                'Create a REST API endpoint for products',
-                'Explain the current project architecture',
-              ].map((suggestion) => (
+              {suggestions[mode].map((suggestion) => (
                 <button
                   key={suggestion}
                   onClick={() => setInput(suggestion)}

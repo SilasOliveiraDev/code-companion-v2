@@ -1,6 +1,7 @@
 import { getSupabaseClient } from '../integrations/supabase';
 import { ChatMessage, AgentMode, ExecutionPlan, PlanStep } from '../types';
 import { v4 as uuidv4 } from 'uuid';
+import { getOpenRouterClient, OpenRouterClient } from '../integrations/openrouter';
 
 // Database types
 interface DbSession {
@@ -50,6 +51,14 @@ interface DbMemory {
 
 export class MemoryService {
   private supabase = getSupabaseClient();
+  private openRouterClient: OpenRouterClient | null = null;
+
+  private getLLMClient(): OpenRouterClient {
+    if (!this.openRouterClient) {
+      this.openRouterClient = getOpenRouterClient();
+    }
+    return this.openRouterClient;
+  }
 
   // ==================== SESSION MANAGEMENT ====================
 
@@ -306,13 +315,16 @@ export class MemoryService {
     // Update access count and last_accessed_at
     if (data && data.length > 0) {
       const ids = data.map((m: DbMemory) => m.id);
-      await this.supabase
-        .from('agent_memory')
-        .update({
-          access_count: this.supabase.rpc('increment_access_count'),
-          last_accessed_at: new Date().toISOString(),
-        })
-        .in('id', ids);
+      try {
+        const { error: rpcError } = await this.supabase.rpc('increment_memory_access', {
+          memory_ids: ids,
+        });
+        if (rpcError) {
+          console.warn('Failed to increment memory access counts:', rpcError);
+        }
+      } catch (e) {
+        console.warn('Failed to increment memory access counts:', e);
+      }
     }
 
     return data || [];
@@ -366,13 +378,42 @@ export class MemoryService {
     
     if (messages.length === 0) return '';
 
-    // Simple summary: extract key topics from user messages
-    const userMessages = messages
-      .filter(m => m.role === 'user')
-      .map(m => m.content)
-      .slice(-10); // Last 10 user messages
+    const recent = messages.slice(-30);
+    const transcript = recent
+      .map((m) => {
+        const role = m.role;
+        const content = (m.content || '').replace(/\s+/g, ' ').trim();
+        const clipped = content.length > 800 ? `${content.slice(0, 800)}…` : content;
+        return `${role.toUpperCase()}: ${clipped}`;
+      })
+      .join('\n');
 
-    const summary = `Conversation topics: ${userMessages.join(' | ').slice(0, 500)}`;
+    let summary = '';
+    try {
+      const client = this.getLLMClient();
+      const response = await client.chat({
+        model: process.env.OPENROUTER_SUMMARY_MODEL || process.env.OPENROUTER_DEFAULT_MODEL,
+        messages: [
+          {
+            role: 'user',
+            content:
+              `Summarize the key topics, decisions, and any TODOs from this conversation in 2-3 sentences. ` +
+              `Use the same language as the conversation.\n\nConversation:\n${transcript}`,
+          },
+        ],
+        max_tokens: 200,
+        temperature: 0.2,
+      });
+      summary = (response.choices[0]?.message?.content || '').trim();
+    } catch (e) {
+      // Fallback summary if LLM is unavailable
+      const userMessages = messages
+        .filter((m) => m.role === 'user')
+        .map((m) => m.content)
+        .slice(-10);
+      summary = `Conversation topics: ${userMessages.join(' | ').slice(0, 500)}`;
+      console.warn('Failed to generate LLM session summary, using fallback:', e);
+    }
     
     // Save summary to session
     await this.updateSession(sessionId, { summary });

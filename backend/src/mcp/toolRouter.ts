@@ -4,6 +4,8 @@ import { writeFiles, WriteFilesParams } from './tools/writeFiles';
 import { deployPreview, DeployPreviewParams } from './tools/deployPreview';
 import { runMigrations, RunMigrationsParams } from './tools/runMigrations';
 import { connectSupabase, ConnectSupabaseParams } from './tools/connectSupabase';
+import { runCommand, RunCommandParams } from './tools/runCommand';
+import { editFile, EditFileParams } from './tools/editFile';
 import {
   readFile, ReadFileParams,
   listDirectory, ListDirectoryParams,
@@ -97,6 +99,19 @@ export const MCP_TOOLS: MCPTool[] = [
       basePath: { type: 'string', description: 'Base path for relative paths' },
     },
   },
+  {
+    name: 'edit_file',
+    description: 'Edit an existing file surgically using an exact string anchor (replace/insert_after/delete). Fails if the target is missing or ambiguous.',
+    parameters: {
+      filePath: { type: 'string', description: 'Path to the existing file to edit', required: true },
+      basePath: { type: 'string', description: 'Base path for relative file paths', required: true },
+      operation: { type: 'string', description: 'One of: replace | insert_after | delete', required: true },
+      target: { type: 'string', description: 'Exact string to match (must occur exactly once)', required: true },
+      replacement: { type: 'string', description: 'Replacement content for replace operation' },
+      content: { type: 'string', description: 'Content to insert for insert_after operation' },
+      encoding: { type: 'string', description: 'File encoding (default: utf8)' },
+    },
+  },
   // Project Tools
   {
     name: 'create_repo',
@@ -110,7 +125,7 @@ export const MCP_TOOLS: MCPTool[] = [
   },
   {
     name: 'write_files',
-    description: 'Write or update multiple files in the workspace',
+    description: 'Create new files in the workspace. Refuses to overwrite existing files (use edit_file to modify).',
     parameters: {
       files: { type: 'array', description: 'Array of {path, content} objects', required: true },
       basePath: { type: 'string', description: 'Base path for relative file paths', required: true },
@@ -147,6 +162,16 @@ export const MCP_TOOLS: MCPTool[] = [
       enableAuth: { type: 'boolean', description: 'Enable authentication' },
     },
   },
+  {
+    name: 'run_command',
+    description: 'Run a shell command in a given working directory and return stdout/stderr',
+    parameters: {
+      command: { type: 'string', description: 'Command to execute', required: true },
+      cwd: { type: 'string', description: 'Working directory (absolute path preferred)', required: true },
+      timeout: { type: 'number', description: 'Timeout in milliseconds (default: 600000)' },
+      env: { type: 'object', description: 'Optional environment variables to merge into process.env' },
+    },
+  },
 ];
 
 export class ToolRouter {
@@ -169,6 +194,8 @@ export class ToolRouter {
         return createDirectory(call.parameters as unknown as CreateDirectoryParams);
       case 'get_file_info':
         return getFileInfo(call.parameters as unknown as FileInfoParams);
+      case 'edit_file':
+        return editFile(call.parameters as unknown as EditFileParams);
       // Project tools
       case 'create_repo':
         return createRepo(call.parameters as unknown as CreateRepoParams);
@@ -180,6 +207,8 @@ export class ToolRouter {
         return runMigrations(call.parameters as unknown as RunMigrationsParams);
       case 'connect_supabase':
         return connectSupabase(call.parameters as unknown as ConnectSupabaseParams);
+      case 'run_command':
+        return runCommand(call.parameters as unknown as RunCommandParams);
       default:
         return {
           success: false,

@@ -50,6 +50,13 @@ export async function writeFiles(params: WriteFilesParams): Promise<MCPToolResul
         fs.mkdirSync(dir, { recursive: true });
       }
 
+      if (fs.existsSync(absolutePath)) {
+        errors.push(
+          `${file.path}: Refusing to overwrite existing file. Use edit_file for modifications.`
+        );
+        continue;
+      }
+
       fs.writeFileSync(absolutePath, file.content, file.encoding || 'utf8');
       written.push(absolutePath);
     } catch (error) {
@@ -59,10 +66,14 @@ export async function writeFiles(params: WriteFilesParams): Promise<MCPToolResul
     }
   }
 
-  if (errors.length > 0 && written.length === 0) {
+  if (errors.length > 0) {
     return {
       success: false,
       error: `Failed to write files: ${errors.join('; ')}`,
+      data: {
+        written,
+        errors,
+      },
     };
   }
 
@@ -70,8 +81,7 @@ export async function writeFiles(params: WriteFilesParams): Promise<MCPToolResul
     success: true,
     data: {
       written,
-      errors: errors.length > 0 ? errors : undefined,
-      message: `Successfully wrote ${written.length} file(s)${errors.length > 0 ? ` with ${errors.length} error(s)` : ''}`,
+      message: `Successfully wrote ${written.length} file(s)`,
     },
   };
 }

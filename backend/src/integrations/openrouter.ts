@@ -238,6 +238,25 @@ export class OpenRouterClient {
             content: msg.content,
           });
         }
+      } else if (msg.role === 'tool') {
+        const toolCallId = ((): string | undefined => {
+          const meta = msg.metadata as Record<string, unknown> | undefined;
+          const candidates = [
+            meta?.tool_call_id,
+            meta?.toolCallId,
+            meta?.toolCallID,
+          ];
+          for (const c of candidates) {
+            if (typeof c === 'string' && c.trim()) return c;
+          }
+          return undefined;
+        })();
+
+        result.push({
+          role: 'tool',
+          content: msg.content,
+          tool_call_id: toolCallId,
+        });
       }
     }
 

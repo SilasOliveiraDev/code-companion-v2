@@ -14,6 +14,80 @@ import { getOpenRouterClient, OpenRouterClient, OpenRouterMessage } from '../int
 import { getMemoryService, MemoryService } from '../services/memoryService';
 import { FileSystemService } from '../workspace/fileSystem';
 import { applyWorkspaceBasePath } from './toolArgs';
+import { ValidationService } from './validationService';
+import * as path from 'path';
+
+const UI_FRONTEND_CONTEXT = `
+## Frontend Stack & Conventions
+
+**Stack:** React 18 + TypeScript + Vite + Tailwind CSS + Zustand
+
+**Design System (Tailwind custom classes — use estas, não invente outras):**
+- Botões: \`btn-primary\`, \`btn-ghost\`, \`btn-success\`, \`btn-danger\`
+- Inputs: \`input\` (classe utilitária definida em index.css)
+- Badges: \`badge\`, \`badge-purple\`, \`badge-green\`, \`badge-yellow\`, \`badge-red\`
+- Headers de painel: \`panel-header\`
+
+**Tokens de cor (use via Tailwind, ex: \`bg-surface-2\`, \`text-accent-light\`):**
+- Superfícies: surface-0 (#0d0d0f), surface-1 (#111113), surface-2 (#18181b), surface-3 (#222226), surface-4 (#2c2c31)
+- Bordas: border-subtle (#2c2c31), border (#3f3f46)
+- Accent: accent (#7c3aed), accent-hover (#6d28d9), accent-light (#a78bfa)
+- Estado: success (#10b981), warning (#f59e0b), error (#ef4444), info (#3b82f6)
+
+**Tipografia:**
+- Sans: Inter (padrão) — use \`font-sans\`
+- Mono: JetBrains Mono — use \`font-mono\`
+- Tamanhos: \`text-xs\`, \`text-sm\` (predominantes), \`text-base\`
+
+**Estado Global (Zustand):**
+- Store principal: \`frontend/src/store/agentStore.ts\` — exporta \`useAgentStore\`
+- Para ler estado: \`const { campo } = useAgentStore()\`
+- Para actions: \`const { action } = useAgentStore()\`
+- Tipos: definidos em \`frontend/src/types/index.ts\`
+
+**Chamadas de API:**
+- Sempre usar o cliente \`api\` de \`frontend/src/services/api.ts\`
+- Padrão: \`const data = await api.nomeDoMetodo(params)\`
+- Adicionar novos métodos seguindo o padrão \`request<T>(path, options)\`
+
+**Padrão de Componente:**
+\`\`\`tsx
+// frontend/src/components/categoria/NomeComponente.tsx
+import React from 'react';
+import { useAgentStore } from '../../store/agentStore';
+
+export function NomeComponente() {
+  const { campo, action } = useAgentStore();
+  return (
+    <div className="...">
+      {/* conteúdo */}
+    </div>
+  );
+}
+\`\`\`
+
+**Dados do Supabase:**
+- Backend expõe dados via REST em \`backend/src/routes/\`
+- Frontend consome via \`services/api.ts\`
+- Para nova tabela: criar rota no backend → adicionar ao api.ts → consumir no componente via store ou hook local
+
+**Estrutura de pastas do frontend:**
+\`\`\`
+frontend/src/
+├── components/
+│   ├── chat/       # Chat, mensagens, planos
+│   ├── editor/     # Monaco editor
+│   ├── explorer/   # Árvore de arquivos
+│   ├── git/        # Git status/commits
+│   ├── layout/     # Sidebar, Workspace, UserProfile
+│   ├── preview/    # Preview de app
+│   ├── terminal/   # Terminal emulado
+│   └── workspace/  # RepoSelector
+├── store/          # agentStore.ts (Zustand)
+├── services/       # api.ts
+└── types/          # index.ts
+\`\`\`
+`;
 
 const ASK_SYSTEM_PROMPT = `You are a senior full-stack software engineer assistant.
 Answer questions about software development, architecture, code, and best practices.
@@ -36,6 +110,8 @@ IMPORTANT: You MUST use your tools to accomplish tasks. When asked to:
 - Read a file: use the read_file tool
 - List directory contents: use the list_directory tool
 - Create/write files: use the write_files tool
+- Edit existing files surgically: use the edit_file tool
+- Execute a terminal command (npm, npx, scripts): use the run_command tool
 - Search for code: use the search_files tool
 - Delete files: use the delete_file tool
 - Move/rename files: use the move_file tool
@@ -47,7 +123,7 @@ IMPORTANT: You MUST use your tools to accomplish tasks. When asked to:
 When given a task:
 1. First, use tools to understand the current codebase (list_directory, read_file)
 2. Plan your changes
-3. Execute changes using appropriate tools (write_files, etc.)
+3. Execute changes using appropriate tools (edit_file for existing files; write_files only for new files)
 4. Verify results if needed
 
 1. ALWAYS start by calling list_directory on the workspace root 
@@ -56,11 +132,17 @@ When given a task:
 2. Complete the full task in one go — do not stop mid-execution 
    to narrate what you are about to do. Act, then summarize.
 
+CRITICAL EDITING RULE:
+- For EXISTING files, ALWAYS use edit_file. NEVER use write_files to overwrite.
+- write_files is ONLY for creating NEW files that do not exist yet.
+
 IMPORTANT RELIABILITY RULE:
 - Never assume file paths exist. If you need a file, first use list_directory or search_files to confirm the actual structure.
 
 Always use the tools - do NOT just describe what you would do. Actually DO it using the available tools.
-Be proactive and complete tasks autonomously.`;
+Be proactive and complete tasks autonomously.
+
+${UI_FRONTEND_CONTEXT}`;
 
 export class AIEngineerAgent {
   private sessions = new Map<string, AgentSession>();
@@ -70,12 +152,14 @@ export class AIEngineerAgent {
   private client: OpenRouterClient;
   private memory: MemoryService;
   private persistMemory: boolean;
+  private validation: ValidationService;
 
   constructor(persistMemory = true) {
     this.client = getOpenRouterClient();
     this.toolRouter = new ToolRouter();
-    this.planner = new ExecutionPlanner();
+    this.planner = new ExecutionPlanner(this.toolRouter);
     this.executor = new PlanExecutor(this.toolRouter);
+    this.validation = new ValidationService(this.toolRouter);
     this.persistMemory = persistMemory;
     
     // Initialize memory service (may fail if Supabase not configured)
@@ -196,7 +280,7 @@ export class AIEngineerAgent {
 
     // Try to load from database
     const defaultWorkspace: WorkspaceState = workspaceState || {
-      rootPath: process.env.REPOS_ROOT || 'C:/Users/Silas/Documents/GitHub',
+      rootPath: process.env.REPOS_ROOT || process.env.WORKSPACE_ROOT || '/tmp/workspace',
       files: [],
       openFiles: [],
       
@@ -412,6 +496,7 @@ export class AIEngineerAgent {
       userMessage,
       session.messages,
       workspaceContext,
+      session.workspace.rootPath,
       session.selectedModel
     );
 
@@ -434,7 +519,7 @@ export class AIEngineerAgent {
       /^(sim|não|yes|no|ok|okay|certo|entendi)$/i,
       /\b(vamos|let's|stop|para|conversar|talk|falar|speak|português|english|idioma|language)\b/i,
       /\b(o que é|what is|me explica|explain|me conta|tell me about)\b/i,
-      /\?$/,  // Questions are usually not implementation requests
+      /.*\?$/,  // Messages that end with a question mark are usually not implementation requests
     ];
 
     for (const pattern of conversationalPatterns) {
@@ -517,6 +602,14 @@ Be helpful, concise, and match the user's language (if they speak Portuguese, re
     onStream?: (chunk: StreamEvent) => void
   ): Promise<string> {
     const workspaceContext = this.buildWorkspaceContext(session.workspace);
+
+    // NEW: inject UI context for UI/UX tasks
+    let extraContext = '';
+    if (this.isUITask(userMessage)) {
+      onStream?.('🎨 Detectada tarefa de UI — carregando contexto do design system...');
+      extraContext = await this.buildUIContext(session.workspace);
+    }
+
     const tools = OpenRouterClient.convertAnthropicTools(this.toolRouter.getToolDefinitionsForClaude());
 
     console.log(`[Agent] AGENT mode - Tools available: ${tools.length}`);
@@ -528,12 +621,23 @@ Be helpful, concise, and match the user's language (if they speak Portuguese, re
     const messages = [...converted];
     const lastMsg = messages[messages.length - 1];
     if (lastMsg && lastMsg.role === 'user') {
+      const uiInstructions = this.isUITask(userMessage) ? `
+
+ATENÇÃO - TAREFA DE UI DETECTADA:
+Antes de escrever qualquer código:
+1. Use list_directory para entender a estrutura de components/ existente
+2. Use read_file para ler 1-2 componentes similares ao que será criado
+3. Siga EXATAMENTE os padrões visuais do design system (classes: btn-primary, input, badge, etc.)
+4. Se precisar de dados do banco: crie rota backend → adicione ao api.ts → consuma no componente
+5. Se precisar de estado: adicione ao agentStore.ts seguindo o padrão Zustand existente
+6. Não use classes Tailwind genéricas quando existir uma classe utilitária do projeto` : '';
+
       if (typeof lastMsg.content === 'string') {
-        lastMsg.content = `${lastMsg.content}\n\nWorkspace context:\n${workspaceContext}`;
+        lastMsg.content = `${lastMsg.content}\n\nWorkspace context:\n${workspaceContext}${extraContext}${uiInstructions}`;
       } else if (Array.isArray(lastMsg.content)) {
         const textPart = lastMsg.content.find(c => c.type === 'text');
         if (textPart) {
-          textPart.text = `${textPart.text}\n\nWorkspace context:\n${workspaceContext}`;
+          textPart.text = `${textPart.text}\n\nWorkspace context:\n${workspaceContext}${extraContext}${uiInstructions}`;
         }
       }
     }
@@ -618,6 +722,30 @@ Be helpful, concise, and match the user's language (if they speak Portuguese, re
               toolCallId: toolCall.id
             });
           }
+
+        // --- Self-Healing Loop (Fase 2.2) ---
+        // Collect TS/TSX files touched by write_files or edit_file in this batch
+        const touchedFiles = this.extractTouchedFiles(assistantMessage.tool_calls, session.workspace.rootPath);
+        if (touchedFiles.length > 0) {
+          const tsFiles = this.validation.filterValidatableFiles(touchedFiles);
+          if (tsFiles.length > 0) {
+            const healed = await this.selfHealLoop(
+              tsFiles,
+              session,
+              messages,
+              tools,
+              onStream
+            );
+            if (!healed) {
+              // Append error context so subsequent LLM iterations are aware
+              messages.push({
+                role: 'user',
+                content: 'TypeScript validation still failing after auto-repair attempts. Please investigate and fix remaining errors.',
+              });
+            }
+          }
+        }
+
         continueLoop = true;
       } else {
         continueLoop = false;
@@ -626,9 +754,210 @@ Be helpful, concise, and match the user's language (if they speak Portuguese, re
 
     if (iterations >= maxIterations) {
       console.warn('[Agent] Max iterations reached');
+      const warning = `⚠️ Limite de iterações atingido. O agente parou após ${maxIterations} ciclos.`;
+      onStream?.(warning);
+      responseParts.push(`\n\n${warning}`);
     }
 
     return responseParts.join('');
+  }
+
+  private isUITask(message: string): boolean {
+    const uiPatterns = [
+      /\b(ui|ux|interface|tela|screen|página|page|componente|component|layout|design)\b/i,
+      /\b(botão|button|input|campo|field|formulário|form|modal|dialog|drawer)\b/i,
+      /\b(lista|list|tabela|table|card|grid|sidebar|header|footer|navbar|menu)\b/i,
+      /\b(onboarding|wizard|step|etapa|fluxo|flow|cadastro|signup|login)\b/i,
+      /\b(exibir|mostrar|show|display|renderizar|render)\b.*\b(dados|data|informações|info)\b/i,
+      /\b(banco de dados|database|supabase)\b.*\b(tela|página|lista|tabela)\b/i,
+      /\b(estilo|style|cor|color|fonte|font|espaçamento|spacing|responsivo|responsive)\b/i,
+    ];
+    return uiPatterns.some((p) => p.test(message));
+  }
+
+  // =========================================================================
+  // Self-Healing helpers  (Fase 2.2)
+  // =========================================================================
+
+  private static readonly MAX_HEAL_ATTEMPTS = 3;
+  private static readonly WRITE_TOOL_NAMES = new Set(['write_files', 'edit_file']);
+
+  /**
+   * Extracts file paths touched by write_files / edit_file tool calls in the
+   * current assistant message so we know which files to validate.
+   */
+  private extractTouchedFiles(
+    toolCalls: Array<{ function: { name: string; arguments: string } }>,
+    workspaceRoot: string
+  ): string[] {
+    const files: string[] = [];
+
+    for (const tc of toolCalls) {
+      if (!AIEngineerAgent.WRITE_TOOL_NAMES.has(tc.function.name)) continue;
+
+      let args: any;
+      try { args = JSON.parse(tc.function.arguments); } catch { continue; }
+
+      if (tc.function.name === 'edit_file' && args.filePath) {
+        files.push(args.filePath);
+      } else if (tc.function.name === 'write_files' && Array.isArray(args.files)) {
+        for (const f of args.files) {
+          if (f.path) files.push(f.path);
+        }
+      }
+    }
+
+    return [...new Set(files)];
+  }
+
+  /**
+   * Runs `tsc --noEmit` on the sub-project(s) that contain the touched files.
+   * If errors are found, asks the LLM to repair them (up to MAX_HEAL_ATTEMPTS).
+   * Returns true once validation passes (or no TS errors are detected).
+   */
+  private async selfHealLoop(
+    tsFiles: string[],
+    session: AgentSession,
+    messages: OpenRouterMessage[],
+    tools: any[],
+    onStream?: (chunk: StreamEvent) => void
+  ): Promise<boolean> {
+    for (let attempt = 1; attempt <= AIEngineerAgent.MAX_HEAL_ATTEMPTS; attempt++) {
+      // Pick one file to trigger validation for the whole sub-project
+      const vResult = await this.validation.validateTypeScript(
+        tsFiles[0],
+        session.workspace.rootPath
+      );
+
+      if (vResult.valid) return true;
+
+      onStream?.(`🔧 TypeScript errors detected — auto-repair attempt ${attempt}/${AIEngineerAgent.MAX_HEAL_ATTEMPTS}...`);
+
+      // Read affected files so the repair LLM has context
+      const fileSnippets: string[] = [];
+      for (const fp of tsFiles.slice(0, 5)) {
+        const readRes = await this.toolRouter.execute({
+          toolName: 'read_file',
+          sessionId: session.id,
+          parameters: { filePath: fp, basePath: session.workspace.rootPath },
+        });
+        if (readRes.success) {
+          const c = (readRes.data as any)?.content ?? '';
+          fileSnippets.push(`### ${fp}\n\`\`\`\n${c}\n\`\`\``);
+        }
+      }
+
+      const repairRequest: OpenRouterMessage = {
+        role: 'user',
+        content: `TypeScript compilation errors were detected. Fix them using edit_file.\n\n## Errors\n${vResult.errors.join('\n')}\n\n## Files\n${fileSnippets.join('\n\n')}`,
+      };
+
+      messages.push(repairRequest);
+
+      // Let the LLM repair
+      let repairDone = false;
+      let repairLoop = true;
+      while (repairLoop) {
+        const resp = await this.client.chat({
+          model: session.selectedModel,
+          messages,
+          tools,
+          tool_choice: 'auto',
+          max_tokens: 4096,
+        });
+
+        const asst = resp.choices[0].message;
+
+        if (asst.tool_calls && asst.tool_calls.length > 0) {
+          messages.push({
+            role: 'assistant',
+            content: asst.content || '',
+            tool_calls: asst.tool_calls,
+          });
+
+          for (const tc of asst.tool_calls) {
+            let args: Record<string, unknown> = {};
+            try { args = JSON.parse(tc.function.arguments); } catch { /* ignore */ }
+            args = applyWorkspaceBasePath(tc.function.name, args, session.workspace.rootPath);
+
+            onStream?.({
+              type: 'tool',
+              toolName: tc.function.name,
+              state: 'start',
+              args,
+              toolCallId: tc.id,
+            });
+
+            const result = await this.toolRouter.execute({
+              toolName: tc.function.name,
+              parameters: args,
+              sessionId: session.id,
+            });
+
+            messages.push({
+              role: 'tool',
+              content: JSON.stringify(result),
+              tool_call_id: tc.id,
+            });
+
+            onStream?.({
+              type: 'tool',
+              toolName: tc.function.name,
+              state: result.success ? 'success' : 'failed',
+              result: result.success ? result.data : undefined,
+              error: result.error,
+              args,
+              toolCallId: tc.id,
+            });
+
+            if (result.success && AIEngineerAgent.WRITE_TOOL_NAMES.has(tc.function.name)) {
+              repairDone = true;
+            }
+          }
+          repairLoop = true;
+        } else {
+          repairLoop = false;
+        }
+      }
+
+      if (!repairDone) {
+        onStream?.('❌ Repair produced no fixes');
+        return false;
+      }
+    }
+
+    // Final check after last repair
+    const final = await this.validation.validateTypeScript(tsFiles[0], session.workspace.rootPath);
+    if (final.valid) {
+      onStream?.('✅ TypeScript validation passed after repair');
+    }
+    return final.valid;
+  }
+
+  private async buildUIContext(workspace: WorkspaceState): Promise<string> {
+    const fsService = new FileSystemService(workspace.rootPath);
+    const contextParts: string[] = [];
+
+    const filesToRead = [
+      'frontend/tailwind.config.js',
+      'frontend/src/index.css',
+      'frontend/src/types/index.ts',
+      'frontend/src/store/agentStore.ts',
+      'frontend/src/services/api.ts',
+    ];
+
+    for (const relPath of filesToRead) {
+      try {
+        const content = fsService.readFile(relPath);
+        contextParts.push(`### ${relPath}\n\`\`\`\n${content.slice(0, 2000)}\n\`\`\``);
+      } catch {
+        // file doesn't exist - skip
+      }
+    }
+
+    return contextParts.length > 0
+      ? `\n\n## Arquivos-chave do Frontend (leia antes de modificar)\n${contextParts.join('\n\n')}`
+      : '';
   }
 
   async approvePlan(sessionId: string): Promise<{

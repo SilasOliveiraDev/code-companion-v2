@@ -23,6 +23,22 @@ export function applyWorkspaceBasePath(
   const normalized: Record<string, unknown> = { ...args };
   const workspaceBase = path.resolve(workspaceRootPath);
 
+  // Special-case: run_command uses `cwd` rather than `basePath`.
+  if (toolName === 'run_command') {
+    const providedCwd = typeof normalized.cwd === 'string' ? normalized.cwd : undefined;
+    if (!providedCwd) {
+      normalized.cwd = workspaceBase;
+      return normalized;
+    }
+
+    const resolved = path.isAbsolute(providedCwd)
+      ? path.resolve(providedCwd)
+      : path.resolve(workspaceBase, providedCwd);
+
+    normalized.cwd = isPathInsideBase(workspaceBase, resolved) ? resolved : workspaceBase;
+    return normalized;
+  }
+
   // Tools that support or require basePath.
   const supportsBasePath = new Set([
     'read_file',
@@ -34,6 +50,7 @@ export function applyWorkspaceBasePath(
     'create_directory',
     'get_file_info',
     'write_files',
+    'edit_file',
   ]);
 
   if (!supportsBasePath.has(toolName)) return normalized;
