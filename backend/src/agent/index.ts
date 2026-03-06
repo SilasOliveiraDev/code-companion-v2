@@ -15,6 +15,9 @@ import { getMemoryService, MemoryService } from '../services/memoryService';
 import { FileSystemService } from '../workspace/fileSystem';
 import { applyWorkspaceBasePath } from './toolArgs';
 import { ValidationService } from './validationService';
+import { ProjectAnalyzer } from './projectAnalyzer';
+import { CodeStyleEnforcer } from './codeStyleEnforcer';
+import { ImportValidator } from './importValidator';
 import * as path from 'path';
 
 const UI_FRONTEND_CONTEXT = `
@@ -142,6 +145,13 @@ IMPORTANT RELIABILITY RULE:
 Always use the tools - do NOT just describe what you would do. Actually DO it using the available tools.
 Be proactive and complete tasks autonomously.
 
+CODE QUALITY RULE:
+For any function you write that has more than 15 lines, you MUST add a JSDoc comment explaining:
+- The purpose of the function
+- @param descriptions for each parameter
+- @returns description of the return value
+For complex logic blocks (conditionals with 3+ branches, data transformations, algorithms), add a short inline comment explaining the reasoning.
+
 ${UI_FRONTEND_CONTEXT}`;
 
 export class AIEngineerAgent {
@@ -153,6 +163,9 @@ export class AIEngineerAgent {
   private memory: MemoryService;
   private persistMemory: boolean;
   private validation: ValidationService;
+  private projectAnalyzer: ProjectAnalyzer;
+  private styleEnforcer: CodeStyleEnforcer;
+  private importValidator: ImportValidator;
 
   constructor(persistMemory = true) {
     this.client = getOpenRouterClient();
@@ -160,6 +173,9 @@ export class AIEngineerAgent {
     this.planner = new ExecutionPlanner(this.toolRouter);
     this.executor = new PlanExecutor(this.toolRouter);
     this.validation = new ValidationService(this.toolRouter);
+    this.projectAnalyzer = new ProjectAnalyzer();
+    this.styleEnforcer = new CodeStyleEnforcer(this.toolRouter);
+    this.importValidator = new ImportValidator(this.toolRouter);
     this.persistMemory = persistMemory;
     
     // Initialize memory service (may fail if Supabase not configured)
@@ -189,12 +205,23 @@ export class AIEngineerAgent {
       }
     }
     
+    // --- Project Intelligence (Fase 3.1) ---
+    let projectIntelligence = '';
+    try {
+      const intel = this.projectAnalyzer.analyze(workspaceState.rootPath);
+      projectIntelligence = this.projectAnalyzer.formatForPrompt(intel);
+      console.log(`[Agent] Project intelligence detected: ${intel.stack.join(', ')} / ${intel.language}`);
+    } catch (error) {
+      console.warn('[Agent] Project analysis failed:', error);
+    }
+
     const session: AgentSession = {
       id: sessionId,
       mode,
       selectedModel,
       messages: [],
       workspace: workspaceState,
+      projectIntelligence: projectIntelligence || undefined,
       createdAt: new Date(),
       updatedAt: new Date(),
     };
@@ -497,7 +524,8 @@ export class AIEngineerAgent {
       session.messages,
       workspaceContext,
       session.workspace.rootPath,
-      session.selectedModel
+      session.selectedModel,
+      session.projectIntelligence
     );
 
     const formatted = this.planner.formatPlanForDisplay(plan);
@@ -603,11 +631,56 @@ Be helpful, concise, and match the user's language (if they speak Portuguese, re
   ): Promise<string> {
     const workspaceContext = this.buildWorkspaceContext(session.workspace);
 
-    // NEW: inject UI context for UI/UX tasks
+    // --- 5.1: Smart Clarification ---
+    const clarification = await this.maybeClarify(session, userMessage);
+    if (clarification) {
+      onStream?.(clarification);
+      return clarification;
+    }
+
+    // --- Project Intelligence context (Fase 3.1) ---
+    const intelligenceCtx = session.projectIntelligence
+      ? `\n\n${session.projectIntelligence}`
+      : '';
+
+    // --- Full-Stack Checklist (Fase 3.3) ---
+    const fullStackChecklist = this.isFullStackTask(userMessage) ? `
+
+CHECKLIST FULL-STACK (não pule nenhum item):
+□ 1. Criar/verificar tabela no Supabase (migration SQL se necessário)
+□ 2. Criar rota REST no backend: backend/src/routes/[nome].ts
+□ 3. Registrar rota no server.ts
+□ 4. Adicionar método no frontend/src/services/api.ts
+□ 5. Adicionar estado + action no agentStore.ts (ou hook local)
+□ 6. Criar/modificar componente React que consome os dados
+□ 7. Adicionar loading state e empty state no componente
+□ 8. Adicionar error handling com mensagem amigável` : '';
+
+    // --- Pattern Extractor instructions (Fase 3.2) ---
+    const patternInstructions = `
+
+PATTERN MATCHING RULE:
+Before creating any new component or route, you MUST:
+1. Use search_files or list_directory to find 2-3 similar existing files
+2. Use read_file to read those examples
+3. Follow the EXACT same patterns (imports, naming, structure, classes)
+Do NOT invent new conventions — match what already exists.`;
+
+    // UI context
     let extraContext = '';
     if (this.isUITask(userMessage)) {
-      onStream?.('🎨 Detectada tarefa de UI — carregando contexto do design system...');
+      onStream?.({ type: 'progress', stage: 'context', message: 'Loading UI design system context...' });
       extraContext = await this.buildUIContext(session.workspace);
+    }
+
+    if (this.isFullStackTask(userMessage)) {
+      onStream?.({ type: 'progress', stage: 'analyzing', message: 'Full-stack task detected — applying checklist...' });
+    }
+
+    // --- 5.2: Intent Summary ---
+    const intentSummary = await this.generateIntentSummary(session, userMessage, workspaceContext);
+    if (intentSummary) {
+      onStream?.(intentSummary);
     }
 
     const tools = OpenRouterClient.convertAnthropicTools(this.toolRouter.getToolDefinitionsForClaude());
@@ -633,11 +706,11 @@ Antes de escrever qualquer código:
 6. Não use classes Tailwind genéricas quando existir uma classe utilitária do projeto` : '';
 
       if (typeof lastMsg.content === 'string') {
-        lastMsg.content = `${lastMsg.content}\n\nWorkspace context:\n${workspaceContext}${extraContext}${uiInstructions}`;
+        lastMsg.content = `${lastMsg.content}\n\nWorkspace context:\n${workspaceContext}${intelligenceCtx}${extraContext}${patternInstructions}${fullStackChecklist}${uiInstructions}`;
       } else if (Array.isArray(lastMsg.content)) {
         const textPart = lastMsg.content.find(c => c.type === 'text');
         if (textPart) {
-          textPart.text = `${textPart.text}\n\nWorkspace context:\n${workspaceContext}${extraContext}${uiInstructions}`;
+          textPart.text = `${textPart.text}\n\nWorkspace context:\n${workspaceContext}${intelligenceCtx}${extraContext}${patternInstructions}${fullStackChecklist}${uiInstructions}`;
         }
       }
     }
@@ -645,17 +718,31 @@ Antes de escrever qualquer código:
     let continueLoop = true;
     const responseParts: string[] = [];
     let iterations = 0;
-    const maxIterations = 10;
+
+    // --- 5.4 Camada 1: Dynamic iteration limit ---
+    const maxIterations = this.estimateMaxIterations(userMessage);
+    console.log(`[Agent] Dynamic maxIterations: ${maxIterations}`);
 
     while (continueLoop && iterations < maxIterations) {
       iterations++;
       console.log(`[Agent] Iteration ${iterations}, sending request with tools...`);
 
+      onStream?.({
+        type: 'progress',
+        stage: 'thinking',
+        message: iterations === 1 ? 'Reasoning about approach...' : `Continuing reasoning (iteration ${iterations}/${maxIterations})...`,
+        stepCurrent: iterations,
+        stepTotal: maxIterations,
+      });
+
+      // --- 5.3: tool_choice: required for first 3 turns ---
+      const toolChoice: 'auto' | 'required' = iterations <= 3 ? 'required' : 'auto';
+
       const response = await this.client.chat({
         model: session.selectedModel,
         messages,
         tools,
-        tool_choice: 'auto',
+        tool_choice: toolChoice,
         max_tokens: 8192,
       });
 
@@ -746,20 +833,183 @@ Antes de escrever qualquer código:
           }
         }
 
+        // --- 6.2: Import Validation ---
+        if (touchedFiles.length > 0) {
+          const importResult = await this.importValidator.validateImports(touchedFiles, session.workspace.rootPath);
+          if (!importResult.valid) {
+            console.log(`[Agent] Found ${importResult.brokenImports.length} broken import(s), attempting auto-fix...`);
+            onStream?.({ type: 'progress', stage: 'healing', message: `Fixing ${importResult.brokenImports.length} broken import(s)...` });
+            const fixed = await this.importValidator.fixBrokenImports(importResult.brokenImports, session.workspace.rootPath);
+            if (fixed.length > 0) {
+              onStream?.({ type: 'progress', stage: 'complete', message: `Auto-fixed imports in ${fixed.length} file(s)` });
+            } else {
+              // Feed broken imports into context so the LLM can fix them
+              const brokenList = importResult.brokenImports
+                .map(bi => `  ${bi.filePath}:${bi.line} → import '${bi.importPath}'${bi.suggestion ? ` (suggestion: '${bi.suggestion}')` : ''}`)
+                .join('\n');
+              messages.push({
+                role: 'user',
+                content: `Broken imports detected. Please fix these:\n${brokenList}`,
+              });
+            }
+          }
+        }
+
+        // --- 5.4 Camada 2: Loop detection ---
+        if (this.isLooping(messages)) {
+          console.warn('[Agent] Loop detected — same tool calls repeated 3 times');
+          const loopWarning = '🔄 Loop detected — the same action was repeated 3 times. Stopping to prevent waste.';
+          onStream?.({ type: 'progress', stage: 'complete', message: loopWarning });
+          responseParts.push(`\n\n${loopWarning}`);
+          break;
+        }
+
         continueLoop = true;
       } else {
         continueLoop = false;
       }
     }
 
+    // --- 6.1: Code Style Enforcement ---
+    const allTouchedFiles = messages
+      .filter((m: any) => m.role === 'assistant' && m.tool_calls?.length)
+      .flatMap((m: any) => {
+        const calls = m.tool_calls || [];
+        return this.extractTouchedFiles(calls, session.workspace.rootPath);
+      });
+
+    if (allTouchedFiles.length > 0) {
+      const uniqueFiles = [...new Set(allTouchedFiles)];
+      onStream?.({ type: 'progress', stage: 'analyzing', message: 'Running code quality checks (Prettier, ESLint, tsc)...' });
+
+      const qualityReport = await this.styleEnforcer.enforceStyle(uniqueFiles, session.workspace.rootPath);
+
+      const parts: string[] = [];
+      if (qualityReport.prettier?.success) parts.push('✅ Prettier');
+      if (qualityReport.eslint?.success) parts.push('✅ ESLint');
+      if (qualityReport.typescript?.success) parts.push('✅ TypeScript');
+      if (qualityReport.prettier && !qualityReport.prettier.success) parts.push('⚠️ Prettier (issues)');
+      if (qualityReport.eslint && !qualityReport.eslint.success) parts.push('⚠️ ESLint (issues)');
+      if (qualityReport.typescript && !qualityReport.typescript.success) parts.push('⚠️ TypeScript (errors)');
+
+      if (parts.length > 0) {
+        const summary = parts.join(' | ');
+        onStream?.({ type: 'progress', stage: 'complete', message: `Code quality: ${summary}` });
+      }
+
+      // If ESLint or tsc still have errors after --fix, feed them back for one more LLM pass
+      if (!qualityReport.allPassed && qualityReport.eslint && !qualityReport.eslint.success) {
+        const lintErrors = qualityReport.eslint.output.slice(0, 2000);
+        responseParts.push(`\n\n⚠️ ESLint issues remaining:\n${lintErrors}`);
+      }
+    }
+
+    // --- 5.4 Camada 3: Checkpoint instead of hard stop ---
     if (iterations >= maxIterations) {
-      console.warn('[Agent] Max iterations reached');
-      const warning = `⚠️ Limite de iterações atingido. O agente parou após ${maxIterations} ciclos.`;
-      onStream?.(warning);
-      responseParts.push(`\n\n${warning}`);
+      console.warn(`[Agent] Max iterations reached (${maxIterations})`);
+
+      const completedTools = messages
+        .filter((m: any) => m.tool_calls)
+        .flatMap((m: any) => m.tool_calls!.map((t: any) => t.function.name));
+      const uniqueTools = [...new Set(completedTools)];
+      const summary = responseParts.join('').slice(-500);
+
+      onStream?.({
+        type: 'checkpoint',
+        message: `Completed ${iterations} cycles but the task may not be finished.`,
+        completedTools: uniqueTools,
+        summary,
+        iterationsUsed: iterations,
+        canContinue: true,
+      });
     }
 
     return responseParts.join('');
+  }
+
+  // --- 5.1: Smart Clarification ---
+  private async maybeClarify(
+    session: AgentSession,
+    userMessage: string
+  ): Promise<string | null> {
+    const prompt = `The user said: "${userMessage}"
+Is this request ambiguous or missing critical information to proceed?
+Answer ONLY with JSON: { "isAmbiguous": boolean, "question": "..." , "options": ["A","B","C"] }
+If not ambiguous, return { "isAmbiguous": false }`;
+
+    try {
+      const response = await this.client.chat({
+        model: session.selectedModel,
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 300,
+      });
+
+      const text = response.choices[0]?.message?.content || '';
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) return null;
+
+      const parsed = JSON.parse(jsonMatch[0]);
+      if (parsed.isAmbiguous && parsed.question) {
+        const options = (parsed.options || []).map((o: string, i: number) => `${i + 1}. ${o}`).join('\n');
+        return `❓ Before proceeding:\n${parsed.question}\n${options}`;
+      }
+    } catch (err) {
+      console.warn('[Agent] Clarification check failed, proceeding anyway:', err);
+    }
+    return null;
+  }
+
+  // --- 5.2: Intent Summary ---
+  private async generateIntentSummary(
+    session: AgentSession,
+    userMessage: string,
+    workspaceContext: string
+  ): Promise<string | null> {
+    const prompt = `Based on this user request and workspace context, summarize in 2-3 bullet points what you understand the user wants.
+User: "${userMessage}"
+Workspace: ${workspaceContext.slice(0, 500)}
+Reply ONLY with the bullet points, no preamble.`;
+
+    try {
+      const response = await this.client.chat({
+        model: session.selectedModel,
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 300,
+      });
+
+      const text = response.choices[0]?.message?.content || '';
+      if (text.trim()) {
+        return `🎯 Here's what I understand you want:\n${text.trim()}`;
+      }
+    } catch (err) {
+      console.warn('[Agent] Intent summary failed, proceeding anyway:', err);
+    }
+    return null;
+  }
+
+  // --- 5.4 Camada 1: Dynamic iteration limit ---
+  private estimateMaxIterations(userMessage: string): number {
+    const lower = userMessage.toLowerCase();
+    if (/\b(crud|full[- ]?stack|migration|deploy)\b/i.test(lower)) return 25;
+    if (/\b(refactor|rewrite|redesign|reestrutur)\b/i.test(lower)) return 20;
+    if (/\b(create|criar|add|adicionar|implement|implementar)\b/i.test(lower)) return 15;
+    if (/\b(fix|corrigir|bug|erro|error)\b/i.test(lower)) return 12;
+    return 10;
+  }
+
+  // --- 5.4 Camada 2: Loop detection ---
+  private isLooping(messages: Array<{ role: string; tool_calls?: any[]; [key: string]: any }>): boolean {
+    const toolMsgs = messages
+      .filter(m => m.role === 'assistant' && m.tool_calls?.length)
+      .slice(-3);
+
+    if (toolMsgs.length < 3) return false;
+
+    const signatures = toolMsgs.map(m =>
+      m.tool_calls!.map((t: any) => `${t.function.name}:${t.function.arguments}`).sort().join('|')
+    );
+
+    return signatures[0] === signatures[1] && signatures[1] === signatures[2];
   }
 
   private isUITask(message: string): boolean {
@@ -773,6 +1023,11 @@ Antes de escrever qualquer código:
       /\b(estilo|style|cor|color|fonte|font|espaçamento|spacing|responsivo|responsive)\b/i,
     ];
     return uiPatterns.some((p) => p.test(message));
+  }
+
+  // --- Fase 3.3: Full-Stack task detector ---
+  private isFullStackTask(message: string): boolean {
+    return /\b(banco|database|supabase|tabela|table|dados|data|lista de|list of|buscar|fetch|exibir|mostrar|show|display)\b/i.test(message);
   }
 
   // =========================================================================
@@ -831,7 +1086,7 @@ Antes de escrever qualquer código:
 
       if (vResult.valid) return true;
 
-      onStream?.(`🔧 TypeScript errors detected — auto-repair attempt ${attempt}/${AIEngineerAgent.MAX_HEAL_ATTEMPTS}...`);
+      onStream?.({ type: 'progress', stage: 'healing', message: `TypeScript errors detected — auto-repair attempt ${attempt}/${AIEngineerAgent.MAX_HEAL_ATTEMPTS}...` });
 
       // Read affected files so the repair LLM has context
       const fileSnippets: string[] = [];
@@ -921,7 +1176,7 @@ Antes de escrever qualquer código:
       }
 
       if (!repairDone) {
-        onStream?.('❌ Repair produced no fixes');
+        onStream?.({ type: 'progress', stage: 'healing', message: 'Repair produced no fixes' });
         return false;
       }
     }
@@ -929,7 +1184,7 @@ Antes de escrever qualquer código:
     // Final check after last repair
     const final = await this.validation.validateTypeScript(tsFiles[0], session.workspace.rootPath);
     if (final.valid) {
-      onStream?.('✅ TypeScript validation passed after repair');
+      onStream?.({ type: 'progress', stage: 'complete', message: 'TypeScript validation passed after repair' });
     }
     return final.valid;
   }
@@ -960,7 +1215,7 @@ Antes de escrever qualquer código:
       : '';
   }
 
-  async approvePlan(sessionId: string): Promise<{
+  async approvePlan(sessionId: string, onStream?: (event: StreamEvent) => void): Promise<{
     success: boolean;
     message: string;
     errors?: string[];
@@ -971,6 +1226,14 @@ Antes de escrever qualquer código:
 
     session.currentPlan.status = 'approved';
     const workspaceContext = this.buildWorkspaceContext(session.workspace);
+
+    onStream?.({
+      type: 'progress',
+      stage: 'executing',
+      message: `Executing plan: ${session.currentPlan.goal}`,
+      stepCurrent: 0,
+      stepTotal: session.currentPlan.steps.length,
+    });
 
     const result = await this.executor.executePlan(
       session.currentPlan,
@@ -987,7 +1250,9 @@ Antes de escrever qualquer código:
         };
         session.messages.push(progressMsg);
       },
-      session.selectedModel
+      session.selectedModel,
+      session.projectIntelligence,
+      onStream
     );
 
     const summaryMsg: ChatMessage = {

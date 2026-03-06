@@ -191,6 +191,13 @@ export const useAgentStore = create<AgentState>((set, get) => ({
                   } else {
                      tools.push(chunk.content);
                   }
+               } else if (chunk.content && typeof chunk.content === 'object' && chunk.content.type === 'progress') {
+                  if (!last.metadata) last.metadata = {};
+                  if (!last.metadata.progressEvents) last.metadata.progressEvents = [];
+                  (last.metadata.progressEvents as any[]).push(chunk.content);
+               } else if (chunk.content && typeof chunk.content === 'object' && chunk.content.type === 'checkpoint') {
+                  if (!last.metadata) last.metadata = {};
+                  last.metadata.checkpoint = chunk.content;
                }
             }
             return { messages: msgs };
@@ -240,29 +247,82 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   approvePlan: async () => {
     const { sessionId, currentPlan } = get();
-    if (!sessionId || !currentPlan) return;
+    if (!sessionId || !currentPlan || get().isStreaming) return;
+
+    const assistantMsg: ChatMessage = {
+      id: crypto.randomUUID(),
+      role: 'assistant',
+      content: '',
+      timestamp: new Date().toISOString(),
+    };
 
     set((state) => ({
       currentPlan: state.currentPlan
         ? { ...state.currentPlan, status: 'executing' }
         : null,
+      messages: [...state.messages, assistantMsg],
+      isStreaming: true,
     }));
 
     try {
-      const result = await api.approvePlan(sessionId);
-      const resultMsg: ChatMessage = {
-        id: crypto.randomUUID(),
-        role: 'assistant',
-        content: result.message,
-        timestamp: new Date().toISOString(),
-      };
-
-      set((state) => ({
-        messages: [...state.messages, resultMsg],
-        currentPlan: state.currentPlan
-          ? { ...state.currentPlan, status: result.success ? 'completed' : 'failed' }
-          : null,
-      }));
+      await api.streamApprovePlan(sessionId, (chunk) => {
+        if (chunk.type === 'chunk' && chunk.content) {
+          set((state) => {
+            const msgs = [...state.messages];
+            const last = msgs[msgs.length - 1];
+            if (last && last.id === assistantMsg.id) {
+              if (typeof chunk.content === 'string') {
+                last.content += chunk.content;
+              } else if (chunk.content && typeof chunk.content === 'object' && chunk.content.type === 'tool') {
+                if (!last.metadata) last.metadata = {};
+                if (!last.metadata.toolCalls) last.metadata.toolCalls = [];
+                const tools = last.metadata.toolCalls as any[];
+                const existingIdx = tools.findIndex(
+                  (t: any) => t.toolCallId === (chunk.content as any).toolCallId && t.toolName === (chunk.content as any).toolName
+                );
+                if (existingIdx >= 0) {
+                  tools[existingIdx] = { ...tools[existingIdx], ...chunk.content };
+                } else {
+                  tools.push(chunk.content);
+                }
+              } else if (chunk.content && typeof chunk.content === 'object' && chunk.content.type === 'progress') {
+                if (!last.metadata) last.metadata = {};
+                if (!last.metadata.progressEvents) last.metadata.progressEvents = [];
+                (last.metadata.progressEvents as any[]).push(chunk.content);
+              }
+            }
+            return { messages: msgs };
+          });
+        } else if (chunk.type === 'done') {
+          set((state) => {
+            const msgs = [...state.messages];
+            const last = msgs[msgs.length - 1];
+            if (last && last.id === assistantMsg.id) {
+              last.content = chunk.message?.content || last.content;
+            }
+            return {
+              messages: msgs,
+              isStreaming: false,
+              currentPlan: chunk.plan || state.currentPlan,
+            };
+          });
+        } else if (chunk.type === 'error') {
+          set((state) => {
+            const msgs = [...state.messages];
+            const last = msgs[msgs.length - 1];
+            if (last && last.id === assistantMsg.id) {
+              last.content = `Error: ${chunk.error}`;
+            }
+            return {
+              messages: msgs,
+              isStreaming: false,
+              currentPlan: state.currentPlan
+                ? { ...state.currentPlan, status: 'failed' }
+                : null,
+            };
+          });
+        }
+      });
 
       await get().refreshFiles();
       await get().refreshGitStatus();
@@ -271,6 +331,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         currentPlan: state.currentPlan
           ? { ...state.currentPlan, status: 'failed' }
           : null,
+        isStreaming: false,
       }));
       console.error('Plan approval failed:', error);
     }

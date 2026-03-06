@@ -178,7 +178,7 @@ router.post('/sessions/:id/message', async (req: Request, res: Response) => {
   }
 });
 
-// POST /api/agent/sessions/:id/plan/approve - Approve current plan
+// POST /api/agent/sessions/:id/plan/approve - Approve current plan (SSE stream)
 router.post('/sessions/:id/plan/approve', async (req: Request, res: Response) => {
   const session = await agent.getOrLoadSession(req.params.id);
   if (!session) {
@@ -191,12 +191,33 @@ router.post('/sessions/:id/plan/approve', async (req: Request, res: Response) =>
   }
 
   try {
-    const result = await agent.approvePlan(req.params.id);
-    res.json(result);
-  } catch (error) {
-    res.status(500).json({
-      error: error instanceof Error ? error.message : 'Failed to execute plan',
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+
+    const result = await agent.approvePlan(req.params.id, (event) => {
+      res.write(`data: ${JSON.stringify({ type: 'chunk', content: event })}\n\n`);
     });
+
+    res.write(
+      `data: ${JSON.stringify({
+        type: 'done',
+        message: { content: result.message },
+        plan: session.currentPlan,
+        success: result.success,
+        errors: result.errors,
+      })}\n\n`
+    );
+    res.end();
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : 'Failed to execute plan';
+    // If headers already sent (SSE started), send error as event
+    if (res.headersSent) {
+      res.write(`data: ${JSON.stringify({ type: 'error', error: errMsg })}\n\n`);
+      res.end();
+    } else {
+      res.status(500).json({ error: errMsg });
+    }
   }
 });
 

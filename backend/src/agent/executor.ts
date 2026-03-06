@@ -1,4 +1,4 @@
-import { ExecutionPlan, PlanStep, MCPToolCall } from '../types';
+import { ExecutionPlan, PlanStep, MCPToolCall, StreamEvent } from '../types';
 import { ToolRouter } from '../mcp/toolRouter';
 import { getOpenRouterClient, OpenRouterClient, OpenRouterMessage } from '../integrations/openrouter';
 import { applyWorkspaceBasePath } from './toolArgs';
@@ -129,7 +129,9 @@ export class PlanExecutor {
     sessionId: string,
     workspaceRootPath: string,
     onProgress?: (message: string) => void,
-    model?: string
+    model?: string,
+    projectIntelligence?: string,
+    onStream?: (event: StreamEvent) => void
   ): Promise<{ success: boolean; message: string; toolCalls: MCPToolCall[] }> {
     const toolCalls: MCPToolCall[] = [];
     const toolErrors: string[] = [];
@@ -146,6 +148,15 @@ export class PlanExecutor {
   3. Use EXCLUSIVAMENTE as classes do design system (btn-primary, input, badge, panel-header, etc.)
   4. Evite inventar novas classes/tokens; use os tokens existentes (bg-surface-*, text-accent-*)` : '';
 
+    const intelligenceBlock = projectIntelligence
+      ? `\n\n${projectIntelligence}`
+      : '';
+
+    const patternMatchingRule = `
+
+PATTERN MATCHING RULE:
+Before creating any new file, first use search_files or list_directory to find 2-3 similar existing files, read them, and replicate the exact same patterns.`;
+
     const prompt = `Execute this step from the approved plan:
 
 Plan Goal: ${plan.goal}
@@ -156,11 +167,11 @@ Current Step (${step.order}/${plan.steps.length}):
 - Files: ${step.files.join(', ') || 'none specified'}
 
 Workspace context:
-${workspaceContext}
+${workspaceContext}${intelligenceBlock}
 
 ${extraUIContext}
 
-${uiPreflightInstructions}
+${uiPreflightInstructions}${patternMatchingRule}
 
 Execute this step now using the available tools.`;
 
@@ -217,6 +228,14 @@ Execute this step now using the available tools.`;
           toolCalls.push(mcpToolCall);
           onProgress?.(`Executing tool: ${toolCall.function.name}`);
 
+          onStream?.({
+            type: 'tool',
+            toolName: toolCall.function.name,
+            state: 'start',
+            args,
+            toolCallId: toolCall.id,
+          });
+
           let result: Awaited<ReturnType<ToolRouter['execute']>>;
           try {
             result = await this.toolRouter.execute(mcpToolCall);
@@ -233,6 +252,16 @@ Execute this step now using the available tools.`;
             toolErrors.push(`${toolCall.function.name}: ${err}`);
             onProgress?.(`Tool failed: ${toolCall.function.name} - ${err}`);
           }
+
+          onStream?.({
+            type: 'tool',
+            toolName: toolCall.function.name,
+            state: result.success ? 'success' : 'failed',
+            result: result.success ? result.data : undefined,
+            error: result.error,
+            args,
+            toolCallId: toolCall.id,
+          });
 
           messages.push({
             role: 'tool',
@@ -302,13 +331,25 @@ Execute this step now using the available tools.`;
     sessionId: string,
     workspaceRootPath: string,
     onStepProgress?: (step: PlanStep, message: string) => void,
-    model?: string
+    model?: string,
+    projectIntelligence?: string,
+    onStream?: (event: StreamEvent) => void
   ): Promise<{ success: boolean; completedSteps: string[]; errors: string[] }> {
     const completedSteps: string[] = [];
     const errors: string[] = [];
 
-    for (const step of plan.steps.sort((a, b) => a.order - b.order)) {
+    const sortedSteps = plan.steps.sort((a, b) => a.order - b.order);
+
+    for (const step of sortedSteps) {
       step.status = 'in_progress';
+
+      onStream?.({
+        type: 'progress',
+        stage: 'executing',
+        message: `Step ${step.order}/${sortedSteps.length}: ${step.description}`,
+        stepCurrent: step.order,
+        stepTotal: sortedSteps.length,
+      });
 
       try {
         const result = await this.executeStep(
@@ -318,7 +359,9 @@ Execute this step now using the available tools.`;
           sessionId,
           workspaceRootPath,
           (message) => onStepProgress?.(step, message),
-          model
+          model,
+          projectIntelligence,
+          onStream
         );
 
         if (result.success) {
@@ -330,12 +373,24 @@ Execute this step now using the available tools.`;
 
           if (tsFiles.length > 0) {
             onStepProgress?.(step, '🔍 Validating TypeScript...');
+            onStream?.({
+              type: 'progress',
+              stage: 'validating',
+              message: `Validating TypeScript for step ${step.order}...`,
+              stepCurrent: step.order,
+              stepTotal: sortedSteps.length,
+            });
             const validationOk = await this.validateAndRepair(
               tsFiles,
               workspaceRootPath,
               sessionId,
               model,
-              (msg) => onStepProgress?.(step, msg)
+              (msg) => {
+                onStepProgress?.(step, msg);
+                if (msg.includes('repair attempt')) {
+                  onStream?.({ type: 'progress', stage: 'healing', message: msg });
+                }
+              }
             );
             if (!validationOk) {
               step.status = 'failed';
@@ -344,6 +399,13 @@ Execute this step now using the available tools.`;
               continue;
             }
             onStepProgress?.(step, '✅ TypeScript validation passed');
+            onStream?.({
+              type: 'progress',
+              stage: 'validating',
+              message: `TypeScript validation passed for step ${step.order}`,
+              stepCurrent: step.order,
+              stepTotal: sortedSteps.length,
+            });
           }
 
           step.status = 'completed';
@@ -363,6 +425,16 @@ Execute this step now using the available tools.`;
 
     plan.status = errors.length === 0 ? 'completed' : 'failed';
     plan.updatedAt = new Date();
+
+    onStream?.({
+      type: 'progress',
+      stage: 'complete',
+      message: errors.length === 0
+        ? `Plan executed successfully — ${completedSteps.length} step(s) completed`
+        : `Plan completed with ${errors.length} error(s)`,
+      stepCurrent: sortedSteps.length,
+      stepTotal: sortedSteps.length,
+    });
 
     return {
       success: errors.length === 0,

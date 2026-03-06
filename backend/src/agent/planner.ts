@@ -269,11 +269,13 @@ User request:\n${userRequest}\n\nWorkspace context:\n${workspaceContext}\n\n${pr
     conversationHistory: ChatMessage[],
     workspaceContext?: string,
     workspaceRootPath?: string,
-    model?: string
+    model?: string,
+    projectIntelligence?: string
   ): Promise<ExecutionPlan> {
+    const intelligenceBlock = projectIntelligence ? `\n\n${projectIntelligence}` : '';
     const systemContextBase = workspaceContext
-      ? `${PLANNER_SYSTEM_PROMPT}\n\nWorkspace context:\n${workspaceContext}`
-      : PLANNER_SYSTEM_PROMPT;
+      ? `${PLANNER_SYSTEM_PROMPT}\n\nWorkspace context:\n${workspaceContext}${intelligenceBlock}`
+      : `${PLANNER_SYSTEM_PROMPT}${intelligenceBlock}`;
 
     // Pre-read phase: list project files, infer existing impacted files, read them, and append their contents.
     let systemContext = systemContextBase;

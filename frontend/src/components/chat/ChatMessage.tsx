@@ -1,8 +1,10 @@
 import React from 'react';
 import { Bot, User } from 'lucide-react';
-import { ChatMessage as ChatMessageType, ExecutionPlan } from '../../types';
+import { ChatMessage as ChatMessageType, ExecutionPlan, StreamEventProgress, StreamEventCheckpoint } from '../../types';
 import { PlanCard } from './PlanCard';
 import { ToolExecutionCard, FileChange } from './ToolExecutionCard';
+import { ProgressIndicator } from './ProgressIndicator';
+import { CheckpointCard } from './CheckpointCard';
 
 interface ChatMessageProps {
   message: ChatMessageType;
@@ -158,6 +160,10 @@ export function ChatMessageComponent({
           </div>
         ) : (
           <div className="w-full space-y-3">
+            {Array.isArray(message.metadata?.progressEvents) && (message.metadata!.progressEvents as StreamEventProgress[]).length > 0 && (
+              <ProgressIndicator events={message.metadata!.progressEvents as StreamEventProgress[]} />
+            )}
+
             {message.metadata?.toolCalls && message.metadata.toolCalls.length > 0 && (
               <div className="space-y-2 mb-3">
                  {message.metadata.toolCalls.map((toolCall: any, idx: number) => {
@@ -201,6 +207,10 @@ export function ChatMessageComponent({
                 onApprove={onApprovePlan}
                 onReject={onRejectPlan}
               />
+            )}
+
+            {message.metadata?.checkpoint && (
+              <CheckpointCard checkpoint={message.metadata.checkpoint as StreamEventCheckpoint} />
             )}
           </div>
         )}

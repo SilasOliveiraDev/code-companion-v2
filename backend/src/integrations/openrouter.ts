@@ -100,7 +100,7 @@ export class OpenRouterClient {
     model?: string;
     messages: OpenRouterMessage[];
     tools?: OpenRouterTool[];
-    tool_choice?: 'auto' | 'none' | { type: 'function'; function: { name: string } };
+    tool_choice?: 'auto' | 'none' | 'required' | { type: 'function'; function: { name: string } };
     max_tokens?: number;
     temperature?: number;
     stream?: false;
@@ -136,7 +136,7 @@ export class OpenRouterClient {
     model?: string;
     messages: OpenRouterMessage[];
     tools?: OpenRouterTool[];
-    tool_choice?: 'auto' | 'none' | { type: 'function'; function: { name: string } };
+    tool_choice?: 'auto' | 'none' | 'required' | { type: 'function'; function: { name: string } };
     max_tokens?: number;
     temperature?: number;
   }): AsyncGenerator<OpenRouterStreamChunk> {

@@ -12,6 +12,8 @@ export interface ChatMessage {
   timestamp: string;
   metadata?: Record<string, unknown> & {
      toolCalls?: StreamEventTool[];
+     checkpoint?: StreamEventCheckpoint;
+     progressEvents?: StreamEventProgress[];
   };
 }
 
@@ -110,4 +112,30 @@ export interface StreamEventTool {
   result?: any;
   error?: string;
   toolCallId?: string;
+}
+
+export type StreamProgressStage =
+  | 'analyzing'
+  | 'context'
+  | 'thinking'
+  | 'executing'
+  | 'validating'
+  | 'healing'
+  | 'complete';
+
+export interface StreamEventProgress {
+  type: 'progress';
+  stage: StreamProgressStage;
+  message: string;
+  stepCurrent?: number;
+  stepTotal?: number;
+}
+
+export interface StreamEventCheckpoint {
+  type: 'checkpoint';
+  message: string;
+  completedTools: string[];
+  summary: string;
+  iterationsUsed: number;
+  canContinue: boolean;
 }

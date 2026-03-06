@@ -97,6 +97,7 @@ export interface AgentSession {
   messages: ChatMessage[];
   currentPlan?: ExecutionPlan;
   workspace: WorkspaceState;
+  projectIntelligence?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -132,7 +133,33 @@ export interface StreamEventTool {
   toolCallId?: string;
 }
 
-export type StreamEvent = string | StreamEventTool;
+export type StreamProgressStage =
+  | 'analyzing'
+  | 'context'
+  | 'thinking'
+  | 'executing'
+  | 'validating'
+  | 'healing'
+  | 'complete';
+
+export interface StreamEventProgress {
+  type: 'progress';
+  stage: StreamProgressStage;
+  message: string;
+  stepCurrent?: number;
+  stepTotal?: number;
+}
+
+export interface StreamEventCheckpoint {
+  type: 'checkpoint';
+  message: string;
+  completedTools: string[];
+  summary: string;
+  iterationsUsed: number;
+  canContinue: boolean;
+}
+
+export type StreamEvent = string | StreamEventTool | StreamEventProgress | StreamEventCheckpoint;
 
 export interface SupabaseConfig {
   projectUrl: string;

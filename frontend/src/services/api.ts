@@ -1,4 +1,4 @@
-import { AgentMode, FileNode, GitStatus, GitCommit, LLMModel, OpenRouterStatus } from '../types';
+import { AgentMode, FileNode, GitStatus, GitCommit, LLMModel, OpenRouterStatus, StreamEventTool, StreamEventProgress, StreamEventCheckpoint } from '../types';
 
 const BASE_URL = '/api';
 
@@ -16,10 +16,41 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
 interface StreamChunk {
   type: 'chunk' | 'done' | 'error';
-  content?: string | import('../types').StreamEventTool;
+  content?: string | StreamEventTool | StreamEventProgress | StreamEventCheckpoint;
   message?: { id: string; role: string; content: string; timestamp: string };
   plan?: import('../types').ExecutionPlan;
+  success?: boolean;
+  errors?: string[];
   error?: string;
+}
+
+function parseSSEStream(reader: ReadableStreamDefaultReader<Uint8Array>, onChunk: (chunk: StreamChunk) => void): Promise<void> {
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  async function pump(): Promise<void> {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const chunk = JSON.parse(line.slice(6)) as StreamChunk;
+            onChunk(chunk);
+          } catch {
+            // Skip malformed chunks
+          }
+        }
+      }
+    }
+  }
+
+  return pump();
 }
 
 export const api = {
@@ -55,28 +86,24 @@ export const api = {
     const reader = res.body?.getReader();
     if (!reader) throw new Error('No response body');
 
-    const decoder = new TextDecoder();
-    let buffer = '';
+    await parseSSEStream(reader, onChunk);
+  },
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+  streamApprovePlan: async (
+    sessionId: string,
+    onChunk: (chunk: StreamChunk) => void
+  ): Promise<void> => {
+    const res = await fetch(`${BASE_URL}/agent/sessions/${sessionId}/plan/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
 
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          try {
-            const chunk = JSON.parse(line.slice(6)) as StreamChunk;
-            onChunk(chunk);
-          } catch {
-            // Skip malformed chunks
-          }
-        }
-      }
-    }
+    const reader = res.body?.getReader();
+    if (!reader) throw new Error('No response body');
+
+    await parseSSEStream(reader, onChunk);
   },
 
   setMode: (sessionId: string, mode: AgentMode) =>
